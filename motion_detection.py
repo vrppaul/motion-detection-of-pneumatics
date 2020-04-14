@@ -47,6 +47,8 @@ class Record:
         self.current_mass_center = current_mass_center
         self.movement_history = movement_history
         self.closest_distance = closest_distance
+        self.most_left_point = initial_mass_center
+        self.most_right_point = initial_mass_center
 
     def check_if_closest_mass_distance(self, mass_center: List[float]):
         """
@@ -81,6 +83,10 @@ class Record:
         """
         self.movement_history[iteration - 1] = Record.find_distance(self.initial_mass_center, mass_center)
         self.current_mass_center = mass_center
+        if self.current_mass_center[0] < self.most_left_point[0]:
+            self.most_left_point = self.current_mass_center
+        elif self.current_mass_center[0] > self.most_right_point[0]:
+            self.most_right_point = self.current_mass_center
 
 
 @dataclass
@@ -159,6 +165,18 @@ def draw_rectangles(frame: np.ndarray, rectangles: List[int]):
     for rectangle in rectangles:
         (x, y, w, h) = rectangle
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.circle(frame, (x + w // 2, y + h // 2), 4, (0, 255, 0), -1)
+
+
+def draw_trajectory(frame: np.ndarray, records: Records):
+    for record in records.records:
+        cv2.line(
+            frame,
+            tuple(map(lambda point: int(point), record.most_left_point)),
+            tuple(map(lambda point: int(point), record.most_right_point)),
+            (0, 255, 0),
+            4
+        )
 
 
 def draw_plots(records: Records):
@@ -177,15 +195,15 @@ def main():
     parser.add_argument("--output_path", default=OUTPUT_PATH, help="Path to output video with detected motion.")
     args = parser.parse_args()
 
-    videos_metada = get_videos_metadata(args.input_path, args.output_path)
+    videos_metadata = get_videos_metadata(args.input_path, args.output_path)
 
     records = Records()
 
-    for i in range(videos_metada.frames_number):
-        frame = videos_metada.input_video.read()
+    for i in range(videos_metadata.frames_number):
+        frame = videos_metadata.input_video.read()
         frame = frame[1]
         gray_frame = grayscale_frame(frame)
-        rectangles = get_rectangles(videos_metada.first_frame, gray_frame)
+        rectangles = get_rectangles(videos_metadata.first_frame, gray_frame)
         draw_rectangles(frame, rectangles)
         mass_centers = list(map(
             lambda rectangle: [rectangle[0] + rectangle[2] / 2, rectangle[1] + rectangle[3] / 2],
@@ -194,16 +212,17 @@ def main():
         records.update_all()
         for mass_center in mass_centers:
             records.update_closest_or_add_new(mass_center, i)
+        draw_trajectory(frame, records)
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
-        videos_metada.output_video.write(frame)
+        videos_metadata.output_video.write(frame)
 
         # if the `q` key is pressed, break from the lop
         if key == ord("q"):
             break
 
     # cleanup the camera and close any open windows
-    videos_metada.input_video.release()
+    videos_metadata.input_video.release()
     cv2.destroyAllWindows()
 
     draw_plots(records)

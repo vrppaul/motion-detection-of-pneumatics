@@ -5,54 +5,55 @@ python disturber.py <input_file>
 - the default output is "out.avi"
 
 """
-import sys
+import argparse
 import random
 
 import cv2
 import numpy as np
 
+from src.paths import INPUT_PATH, OUTPUT_PATH
+
+
 def disturb_image(frame):
     out = frame.copy()
 
     # shake effect
-    if random.choice([True, False]):
-        if random.choice([True, False]):
-            out[1:,:] = out[:-1,:]
-        else:
-            out[:-1,:] = out[1:,:]
-
-    if random.choice([True, False]):
-        if random.choice([True, False]):
-            out[:,1:] = out[:,:-1]
-        else:
-            out[:,:-1] = out[:,1:]
+    # if random.choice([True, False]):
+    #     if random.choice([True, False]):
+    #         out[1:, :] = out[:-1, :]
+    #     else:
+    #         out[:-1, :] = out[1:, :]
+    #
+    # if random.choice([True, False]):
+    #     if random.choice([True, False]):
+    #         out[:, 1:] = out[:, :-1]
+    #     else:
+    #         out[:, :-1] = out[:, 1:]
 
     # add noise
     noise_points = np.random.randint(0, 100, out.shape, dtype=out.dtype)
     out = cv2.add(out, noise_points)
 
     # add line noise
-    noise_lines = np.random.choice(a=[False, True], size=out.shape[1], p=[0.99, 0.01])
-    out[:,noise_lines] = 255
+    # noise_lines = np.random.choice(a=[False, True], size=out.shape[1], p=[0.99, 0.01])
+    # out[:, noise_lines] = 255
 
     return out
 
-if __name__ == "__main__":
-    INPUT_PATH = sys.argv[1]
-    try:
-        OUTPUT_PATH = sys.argv[2]
-    except:
-        OUTPUT_PATH = "out.avi"
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Enter input and output video paths")
+    parser.add_argument("--input_path", default=INPUT_PATH, help="Path to input raw video.")
+    parser.add_argument("--output_path", default=OUTPUT_PATH, help="Path to output video with detected motion.")
+    args = parser.parse_args()
 
     # Create a VideoCapture object
-    cap = cv2.VideoCapture(INPUT_PATH)
+    cap = cv2.VideoCapture(args.input_path)
 
     fps = cap.get(cv2.CAP_PROP_FPS)
 
-
     # Check if camera opened successfully
-    if (cap.isOpened() == False):
+    if not cap.isOpened():
         print("Unable to read camera feed")
 
     # Default resolutions of the frame are obtained.The default resolutions are system dependent.
@@ -60,13 +61,13 @@ if __name__ == "__main__":
     frame_width = int(cap.get(3))
     frame_height = int(cap.get(4))
 
-    # Define the codec and create VideoWriter object.The output is stored in 'outpy.avi' file.
-    out = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps, (frame_width, frame_height))
+    # Define the codec and create VideoWriter object.The output is stored in 'out.avi' file.
+    out = cv2.VideoWriter(args.output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
 
-    while (True):
+    while True:
         ret, frame = cap.read()
 
-        if ret == True:
+        if ret:
 
             # Write the frame into the file 'output.avi'
 
@@ -85,12 +86,9 @@ if __name__ == "__main__":
         else:
             break
 
-            # When everything done, release the video capture and video write objects
+    # When everything done, release the video capture and video write objects
     cap.release()
     out.release()
 
     # Closes all the frames
     cv2.destroyAllWindows()
-
-
-
