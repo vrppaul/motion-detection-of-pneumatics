@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass, field
 import math
+import statistics
 from typing import List
 
 import cv2
@@ -9,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.paths import INPUT_PATH, OUTPUT_PATH
+
+LEFT, RIGHT = 0, 1
 
 
 @dataclass
@@ -26,6 +29,7 @@ class Record:
     """
     def __init__(
             self,
+            record_id: int,
             initial_mass_center: List[float],
             current_mass_center: List[float],
             movement_history: List[float],
@@ -43,12 +47,18 @@ class Record:
         @:param closest_distance: int
         Parameter which determines how far can next mass_center be to correspond to this record
         """
+        self.record_id = record_id
         self.initial_mass_center = initial_mass_center
         self.current_mass_center = current_mass_center
         self.movement_history = movement_history
         self.closest_distance = closest_distance
         self.most_left_point = initial_mass_center
         self.most_right_point = initial_mass_center
+        self.movement_direction_history = []
+        self.current_mean_position = 0
+        self.last_detected_endpoint = None
+        self.amount_of_runs = 1
+        self.path = []
 
     def check_if_closest_mass_distance(self, mass_center: List[float]):
         """
@@ -122,7 +132,56 @@ class Records:
                 found = True
                 break
         if not found:
-            self.records.append(Record(mass_center, mass_center, [0] * iteration))
+            new_record_id = len(self.records)
+            self.records.append(Record(new_record_id, mass_center, mass_center, [0] * iteration))
+
+    def detect_and_save_direction(self):
+        """
+        This function detects direction by following method:
+        - It takes a frame of `window_size__elements` last movements
+        - It compares a median value of that frame with a median of previous window
+        - If difference is bigger than `window_size__pixels` -> register a movement in a direction
+        :return:
+        """
+        window_size__elements = 10
+        window_size__pixels = 2
+        for path in self.records:
+            if len(path.movement_history) > window_size__elements:
+                current_mean_position = statistics.median(
+                    path.movement_history[-window_size__elements:]
+                )
+                if current_mean_position - path.current_mean_position > window_size__pixels:
+                    path.movement_direction_history.append(RIGHT)
+                    path.current_mean_position = current_mean_position
+                elif path.current_mean_position - current_mean_position > window_size__pixels:
+                    path.movement_direction_history.append(LEFT)
+                    path.current_mean_position = current_mean_position
+
+    def detect_endpoint(self):
+        """
+        This function detects endpoints by following method:
+        - Takes a window of last 10 movement records
+        - If most of records is right -> last detected endpoint is left
+        - If most of records is left -> last detected endpoint is right
+        - If current detected endpoint is left and last detected endpoint is right -> +1 amount of runs
+        - And vice versa
+        :return:
+        """
+        window_size = 10
+        for path in self.records:
+            if len(path.movement_direction_history) > window_size:
+                right_directions = tuple(filter(
+                    lambda direction: direction == RIGHT,
+                    path.movement_direction_history[-window_size:]
+                ))
+                if len(right_directions) > 5:
+                    if path.last_detected_endpoint == RIGHT:
+                        path.amount_of_runs += 1
+                    path.last_detected_endpoint = LEFT
+                else:
+                    if path.last_detected_endpoint == LEFT:
+                        path.amount_of_runs += 1
+                    path.last_detected_endpoint = RIGHT
 
 
 def grayscale_frame(frame: np.ndarray) -> np.ndarray:
@@ -212,6 +271,8 @@ def main():
         records.update_all()
         for mass_center in mass_centers:
             records.update_closest_or_add_new(mass_center, i)
+        records.detect_and_save_direction()
+        records.detect_endpoint()
         draw_trajectory(frame, records)
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -226,6 +287,11 @@ def main():
     cv2.destroyAllWindows()
 
     draw_plots(records)
+
+    print(records.records[0].amount_of_runs)
+    print(records.records[0].movement_direction_history)
+    print(records.records[1].amount_of_runs)
+    print(records.records[1].movement_direction_history)
 
 
 if __name__ == "__main__":
