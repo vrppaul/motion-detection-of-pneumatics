@@ -44,24 +44,6 @@ def get_rectangles(first_frame: np.ndarray, current_frame: np.ndarray) -> List[L
     return rectangles
 
 
-def draw_rectangles(frame: np.ndarray, rectangles: List[int]):
-    for rectangle in rectangles:
-        (x, y, w, h) = rectangle
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cv2.circle(frame, (x + w // 2, y + h // 2), 4, (0, 255, 0), -1)
-
-
-def draw_trajectory(frame: np.ndarray, records: Records):
-    for record in records.records:
-        cv2.line(
-            frame,
-            tuple(map(lambda point: int(point), record.most_left_point)),
-            tuple(map(lambda point: int(point), record.most_right_point)),
-            (0, 255, 0),
-            4
-        )
-
-
 def draw_plots(records: Records):
     fig = plt.figure()
     cols = 2

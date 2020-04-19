@@ -26,16 +26,16 @@ class Record:
             self,
             record_id: int,
             initial_rectangle: List[int],
-            initial_mass_center: List[float],
-            current_mass_center: List[float],
+            initial_mass_center: Tuple[int, ...],
+            current_mass_center: Tuple[int, ...],
             movement_history: List[float],
             closest_distance: int = 20
     ):
         """
-        @:param initial_mass_center: List[float]
+        @:param initial_mass_center: Tuple[int, ...]
         Initial mass center is taken from the first observed rectangle.
         All changes will be tracked relatively to it.
-        @:param current_mass_center: List[float]
+        @:param current_mass_center: Tuple[int, ...]
         Current mass center is a parameter which helps to determine, whether given
         mass_center corresponds to this record by measuring euclidean distance.
         @:param movement_history: List[float]
@@ -62,7 +62,7 @@ class Record:
         self.most_upper_edge = y
         self.most_lower_edge = y + h
 
-    def check_if_closest_mass_distance(self, mass_center: List[float]):
+    def check_if_closest_mass_distance(self, mass_center: Tuple[int, ...]):
         """
         Evaluates whether given mass_center corresponds to this
         record by measuring current_mass_center and given mass_center euclidean distance.
@@ -73,7 +73,7 @@ class Record:
         return self.find_distance(self.current_mass_center, mass_center) < self.closest_distance
 
     @staticmethod
-    def find_distance(first_mc: List[float], second_mc: List[float]) -> float:
+    def find_distance(first_mc: Tuple[int, ...], second_mc: Tuple[int, ...]) -> float:
         """
         Measures euclidean between two mass centers
 
@@ -85,7 +85,7 @@ class Record:
             (first_mc[0] - second_mc[0]) ** 2 + (first_mc[1] - second_mc[1]) ** 2
         )
 
-    def update_record_data(self, rect_mass_center: Tuple[List[int], List[float]], iteration: int):
+    def update_record_data(self, rect_mass_center: Tuple[List[int], Tuple[int, ...]], iteration: int):
         """
         If given mass_center corresponds to this record, this function updates
         all parameters of this record.
@@ -160,9 +160,9 @@ class Records:
                 )
 
     @staticmethod
-    def _associate_mass_centers_to(rectangles: List[List[int]]) -> List[Tuple[List[int], List[float]]]:
+    def _associate_mass_centers_to(rectangles: List[List[int]]) -> List[Tuple[List[int], Tuple[int, ...]]]:
         return list(map(
-            lambda rectangle: (rectangle, [rectangle[0] + rectangle[2] / 2, rectangle[1] + rectangle[3] / 2]),
+            lambda rectangle: (rectangle, (rectangle[0] + rectangle[2] // 2, rectangle[1] + rectangle[3] // 2)),
             rectangles
         ))
 
@@ -222,4 +222,22 @@ class Records:
                 (path.most_right_edge, path.most_lower_edge),
                 (0, 255, 0),
                 2
+            )
+            print(path.current_mass_center)
+            cv2.circle(
+                frame,
+                path.current_mass_center,
+                4,
+                (0, 255, 0),
+                -1
+            )
+
+    def draw_trajectory(self, frame: np.ndarray):
+        for path in self.records:
+            cv2.line(
+                frame,
+                tuple(map(lambda point: int(point), path.most_left_point)),
+                tuple(map(lambda point: int(point), path.most_right_point)),
+                (0, 255, 0),
+                4
             )

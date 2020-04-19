@@ -31,7 +31,7 @@ def main():
         records.update_all()
         records.update_closest_or_add_new(rectangles, i)
         records.draw_rectangles(frame)
-        # records.draw_trajectory(frame)
+        records.draw_trajectory(frame)
 
         records.detect_and_save_direction()
         records.detect_endpoint()
