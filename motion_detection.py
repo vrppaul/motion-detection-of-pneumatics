@@ -20,7 +20,8 @@ def main():
 
     videos_metadata = get_videos_metadata(args.input_path, args.output_path)
 
-    records = Records()
+    max_amount_of_recorded_runs = 2
+    records = Records(max_amount_of_recorded_runs)
 
     for i in range(videos_metadata.frames_number):
         frame = videos_metadata.input_video.read()
@@ -28,13 +29,15 @@ def main():
         gray_frame = grayscale_frame(frame)
 
         rectangles = get_rectangles(videos_metadata.first_frame, gray_frame)
+
         records.update_all()
         records.update_closest_or_add_new(rectangles, i)
+        records.detect_and_save_direction()
+        records.detect_endpoint()
+
         records.draw_rectangles(frame)
         records.draw_trajectory(frame)
 
-        records.detect_and_save_direction()
-        records.detect_endpoint()
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
         videos_metadata.output_video.write(frame)

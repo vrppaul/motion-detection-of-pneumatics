@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import math
 import statistics
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 import cv2
 import numpy as np
@@ -48,8 +48,8 @@ class Record:
         self.current_mass_center = current_mass_center
         self.movement_history = movement_history
         self.closest_distance = closest_distance
-        self.most_left_point = initial_mass_center
-        self.most_right_point = initial_mass_center
+        self.most_left_points: Set[Tuple[int, ...]] = {(1000000, 1000000)}
+        self.most_right_points: Set[Tuple[int, ...]] = {(-1000000, -1000000)}
         self.movement_direction_history = []
         self.current_mean_position = 0
         self.last_detected_endpoint = None
@@ -85,22 +85,22 @@ class Record:
             (first_mc[0] - second_mc[0]) ** 2 + (first_mc[1] - second_mc[1]) ** 2
         )
 
-    def update_record_data(self, rect_mass_center: Tuple[List[int], Tuple[int, ...]], iteration: int):
+    def update_record_data(self, rectangle: List[int]):
         """
         If given mass_center corresponds to this record, this function updates
         all parameters of this record.
-        :param rect_mass_center:
-        :param iteration:
+        :param rectangle:
         :return:
         """
-        rectangle, mass_center = rect_mass_center
 
-        self.movement_history[iteration - 1] = Record.find_distance(self.initial_mass_center, mass_center)
-        self.current_mass_center = mass_center
-        if self.current_mass_center[0] < self.most_left_point[0]:
-            self.most_left_point = self.current_mass_center
-        elif self.current_mass_center[0] > self.most_right_point[0]:
-            self.most_right_point = self.current_mass_center
+        if self.current_mass_center[0] < max(self.most_left_points, key=lambda point: point[0])[0]:
+            self.most_left_points.add(self.current_mass_center)
+            if len(self.most_left_points) > 5:
+                self.most_left_points.remove(max(self.most_left_points, key=lambda point: point[0]))
+        if self.current_mass_center[0] > min(self.most_right_points, key=lambda point: point[0])[0]:
+            self.most_right_points.add(self.current_mass_center)
+            if len(self.most_right_points) > 5:
+                self.most_right_points.remove(min(self.most_right_points, key=lambda point: point[0]))
 
         x, y, w, h = rectangle
         if x < self.most_left_edge:
@@ -112,13 +112,18 @@ class Record:
         if y + h > self.most_lower_edge:
             self.most_lower_edge = y + h
 
+    def update_movement_history(self, mass_center: Tuple[int, ...], iteration: int):
+        self.current_mass_center = mass_center
+        self.movement_history[iteration - 1] = Record.find_distance(self.initial_mass_center, mass_center)
+
 
 class Records:
     """
     This is a simple dataclass, which contains all records and updates them.
     """
-    def __init__(self):
+    def __init__(self, max_amount_of_recorded_runs: int):
         self.records: List[Record] = []
+        self.max_amount_of_recorded_runs = max_amount_of_recorded_runs
 
     def update_all(self):
         """
@@ -144,7 +149,9 @@ class Records:
             found = False
             for path in self.records:
                 if path.check_if_closest_mass_distance(rect_mass_center[1]):
-                    path.update_record_data(rect_mass_center, iteration)
+                    if path.amount_of_runs <= self.max_amount_of_recorded_runs:
+                        path.update_record_data(rect_mass_center[0])
+                    path.update_movement_history(rect_mass_center[1], iteration)
                     found = True
                     break
             if not found:
@@ -223,7 +230,6 @@ class Records:
                 (0, 255, 0),
                 2
             )
-            print(path.current_mass_center)
             cv2.circle(
                 frame,
                 path.current_mass_center,
@@ -234,10 +240,20 @@ class Records:
 
     def draw_trajectory(self, frame: np.ndarray):
         for path in self.records:
-            cv2.line(
-                frame,
-                tuple(map(lambda point: int(point), path.most_left_point)),
-                tuple(map(lambda point: int(point), path.most_right_point)),
-                (0, 255, 0),
-                4
-            )
+            if path.amount_of_runs > self.max_amount_of_recorded_runs:
+                most_left_point = tuple(np.median(tuple(path.most_left_points), axis=0).astype(int))
+                most_right_point = tuple(np.median(tuple(path.most_right_points), axis=0).astype(int))
+                coefficients = np.polyfit(
+                    (most_left_point[0], most_right_point[0]),
+                    (most_left_point[1], most_right_point[1]),
+                    1
+                )
+                left_y = int(coefficients[0] * path.most_left_edge) + int(coefficients[1])
+                right_y = int(coefficients[0] * path.most_right_edge) + int(coefficients[1])
+                cv2.line(
+                    frame,
+                    (path.most_left_edge, left_y),
+                    (path.most_right_edge, right_y),
+                    (0, 255, 0),
+                    4
+                )
