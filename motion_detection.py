@@ -1,14 +1,14 @@
 import argparse
+from pprint import pprint
 
 import cv2
 
+from constants import MAX_AMOUNT_OF_TRAINING_RUNS
 from src.paths import INPUT_PATH, OUTPUT_PATH
-from models import Records
+from models import Movements
 from video_utils import (
     get_videos_metadata,
-    get_rectangles,
     grayscale_frame,
-    draw_plots,
 )
 
 
@@ -16,27 +16,28 @@ def main():
     parser = argparse.ArgumentParser(description="Enter input and output video paths")
     parser.add_argument("--input_path", default=INPUT_PATH, help="Path to input raw video.")
     parser.add_argument("--output_path", default=OUTPUT_PATH, help="Path to output video with detected motion.")
+    parser.add_argument(
+        "--recorded_runs",
+        default=MAX_AMOUNT_OF_TRAINING_RUNS,
+        help="This number represents the maximum amount of runs,"
+             "which are taken to train the model to detect the movement"
+    )
     args = parser.parse_args()
 
     videos_metadata = get_videos_metadata(args.input_path, args.output_path)
+    max_amount_of_recorded_runs = args.recorded_runs
 
-    max_amount_of_recorded_runs = 2
-    records = Records(max_amount_of_recorded_runs)
+    movements = Movements(
+        first_frame=videos_metadata.first_frame,
+        max_amount_of_recorded_runs=max_amount_of_recorded_runs
+    )
 
-    for i in range(videos_metadata.frames_number):
-        frame = videos_metadata.input_video.read()
-        frame = frame[1]
+    for frame_index in range(videos_metadata.frames_number):
+        frame = videos_metadata.input_video.read()[1]
         gray_frame = grayscale_frame(frame)
 
-        rectangles = get_rectangles(videos_metadata.first_frame, gray_frame)
-
-        records.update_all()
-        records.update_closest_or_add_new(rectangles, i)
-        records.detect_and_save_direction()
-        records.detect_endpoint()
-
-        records.draw_rectangles(frame)
-        records.draw_trajectory(frame)
+        movements.detect_movement_on_frame(gray_frame, frame_index)
+        movements.add_movements_to_frame(frame)
 
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -50,12 +51,8 @@ def main():
     videos_metadata.input_video.release()
     cv2.destroyAllWindows()
 
-    draw_plots(records)
-
-    print(records.records[0].amount_of_runs)
-    print(records.records[0].movement_direction_history)
-    print(records.records[1].amount_of_runs)
-    print(records.records[1].movement_direction_history)
+    movements.draw_plots()
+    pprint(movements.generate_statistics())
 
 
 if __name__ == "__main__":

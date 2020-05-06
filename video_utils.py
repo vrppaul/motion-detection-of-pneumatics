@@ -1,11 +1,17 @@
+from dataclasses import dataclass
 from typing import List
 
 import cv2
 import imutils
-import matplotlib.pyplot as plt
 import numpy as np
 
-from models import VideosMetadata, Records
+
+@dataclass
+class VideosMetadata:
+    input_video: cv2.VideoCapture
+    output_video: cv2.VideoWriter
+    first_frame: np.ndarray
+    frames_number: int
 
 
 def grayscale_frame(frame: np.ndarray) -> np.ndarray:
@@ -42,15 +48,3 @@ def get_rectangles(first_frame: np.ndarray, current_frame: np.ndarray) -> List[L
     contours = filter(lambda contour: cv2.contourArea(contour) > 500, contours)
     rectangles = list(map(lambda contour: cv2.boundingRect(contour), contours))
     return rectangles
-
-
-def draw_plots(records: Records):
-    fig = plt.figure()
-    cols = 2
-    rows = len(records.records) // cols + 1
-    for i, path in enumerate(records.records):
-        ax = fig.add_subplot(rows, cols, i + 1)
-        ax.plot(range(len(path.movement_history)), path.movement_history)
-    plt.show()
-
-
