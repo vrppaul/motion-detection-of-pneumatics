@@ -52,12 +52,13 @@ class Movement:
         self.movement_history = movement_history
 
         # Initializing implicit arguments
+        self.amount_of_runs: int = 1
+        self.current_median_position: float = 0
+        self.median_position_history: List[float] = []
+        self.last_detected_endpoint: Optional[str] = None
         self.most_left_points: Set[Point] = {(1000000, 1000000)}
         self.most_right_points: Set[Point] = {(-1000000, -1000000)}
-        self.movement_direction_history: List[int] = []
-        self.current_median_position: float = 0
-        self.last_detected_endpoint: Optional[int] = None
-        self.amount_of_runs: int = 1
+        self.movement_direction_history: List[str] = []
 
         x, y, w, h = initial_rectangle
         self.most_left_edge: int = x
@@ -87,6 +88,7 @@ class Movement:
             current_median_position = statistics.median(
                 self.movement_history[-window_size_elements:]  # Last elements
             )
+            self.median_position_history.append(current_median_position)
             if current_median_position - self.current_median_position > window_size_pixels:
                 self.movement_direction_history.append(RIGHT)
                 self.current_median_position = current_median_position
@@ -233,7 +235,7 @@ class Movements:
         rows = len(self.movements) // cols + 1
         for i, movement in enumerate(self.movements):
             ax = fig.add_subplot(rows, cols, i + 1)
-            ax.plot(range(len(movement.movement_history)), movement.movement_history)
+            ax.plot(range(len(movement.median_position_history)), movement.median_position_history)
         plt.show()
 
     def generate_statistics(self) -> Dict:
