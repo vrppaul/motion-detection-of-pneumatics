@@ -32,7 +32,7 @@ Rectangle = List[int]
 Point = Tuple[int, ...]
 
 
-class Movement:
+class Motion:
     """
     This class is required to track mass centers of all pneumatics'
     detected rectangles of movement.
@@ -141,7 +141,7 @@ class Movement:
     def update_movement_history(self, mass_center: Point, iteration: int):
         self.mass_center_history.append(mass_center)
         self.current_mass_center = mass_center
-        self.movement_history[iteration - 1] = Movement.find_distance(self.initial_mass_center, mass_center)
+        self.movement_history[iteration - 1] = Motion.find_distance(self.initial_mass_center, mass_center)
 
     def update_record_data(self, rectangle: Rectangle):
         """
@@ -173,6 +173,7 @@ class Movement:
 
     def generate_statistics(self) -> Dict:
         movement_statistics = {
+            "id": self.record_id,
             "amount_of_runs": self.amount_of_runs,
             "movement_history": self._get_cleared_movement_history_for_statistics(),
             "trajectory": [self.trajectory_left, self.trajectory_right],
@@ -216,7 +217,7 @@ class Movement:
             self.most_lower_edge = y + h
 
 
-class MovementDetector:
+class MotionDetector:
     """
     This class contains all movement records and updates them.
     """
@@ -230,7 +231,7 @@ class MovementDetector:
         self.max_amount_of_recorded_runs = max_amount_of_recorded_runs
 
         # Initializing implicit arguments
-        self.movements: List[Movement] = []
+        self.detected_motions: List[Motion] = []
 
         # Constants
         self._direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
@@ -238,7 +239,7 @@ class MovementDetector:
         self._endpoint_window_size_elements: int = ENDPOINT_WINDOW_SIZE__ELEMENTS
         self._threshold_value: int = THRESHOLD_VALUE
 
-    def detect_movement_on_frame(
+    def detect_motions_on_frame(
             self,
             gray_frame: np.ndarray,
             frame_index: int
@@ -256,23 +257,23 @@ class MovementDetector:
         self._detect_and_save_endpoints()
         self._calculate_and_save_trajectory()
 
-    def add_movements_to_frame(self, frame: np.ndarray):
+    def add_motions_to_frame(self, frame: np.ndarray):
         self._draw_rectangles_on_frame(frame)
         self._draw_trajectory_on_frame(frame)
 
     def draw_plots(self):
         fig = plt.figure()
         cols = 2
-        rows = len(self.movements) // cols + 1
-        for i, movement in enumerate(self.movements):
+        rows = len(self.detected_motions) // cols + 1
+        for i, movement in enumerate(self.detected_motions):
             ax = fig.add_subplot(rows, cols, i + 1)
             ax.plot(range(len(movement.median_position_history)), movement.median_position_history)
         plt.show()
 
     def generate_statistics(self) -> Dict:
         all_movements_statistics = {
-            "amount_of_motors": len(self.movements),
-            "statistics": [movement.generate_statistics() for movement in self.movements]
+            "amount_of_motors": len(self.detected_motions),
+            "statistics": [movement.generate_statistics() for movement in self.detected_motions]
         }
         return all_movements_statistics
 
@@ -296,7 +297,7 @@ class MovementDetector:
         but nevertheless it should be updated as 0 movement.
         :return: None
         """
-        for movement in self.movements:
+        for movement in self.detected_motions:
             movement.add_zero_placeholder()
 
     def _detect_and_update_closest_or_create_new(self, gray_frame: np.ndarray, iteration: int):
@@ -327,7 +328,7 @@ class MovementDetector:
         :param iteration:
         :return: bool
         """
-        for movement in self.movements:
+        for movement in self.detected_motions:
             if movement.check_if_closest_mass_distance(rect_mass_center[1]):
                 if movement.amount_of_runs <= self.max_amount_of_recorded_runs:
                     movement.update_record_data(rect_mass_center[0])
@@ -342,9 +343,9 @@ class MovementDetector:
         :param iteration:
         :return:
         """
-        new_record_id = len(self.movements)
-        self.movements.append(
-            Movement(
+        new_record_id = len(self.detected_motions)
+        self.detected_motions.append(
+            Motion(
                 new_record_id,
                 rect_mass_center[0],
                 rect_mass_center[1],
@@ -367,7 +368,7 @@ class MovementDetector:
         - If difference is bigger than `WINDOW_SIZE__PIXELS` -> register a movement in a direction
         :return:
         """
-        for movement in self.movements:
+        for movement in self.detected_motions:
             movement.detect_and_save_direction(
                 self._direction_window_size_elements,
                 self._direction_window_size_pixels
@@ -383,16 +384,16 @@ class MovementDetector:
         - And vice versa
         :return:
         """
-        for movement in self.movements:
+        for movement in self.detected_motions:
             movement.detect_and_save_endpoint(self._endpoint_window_size_elements)
 
     def _calculate_and_save_trajectory(self):
-        for movement in self.movements:
+        for movement in self.detected_motions:
             if movement.amount_of_runs == self.max_amount_of_recorded_runs + 1:
                 movement.calculate_and_save_trajectory()
 
     def _draw_rectangles_on_frame(self, frame: np.ndarray):
-        for movement in self.movements:
+        for movement in self.detected_motions:
             cv2.rectangle(
                 frame,
                 (movement.most_left_edge, movement.most_upper_edge),
@@ -409,7 +410,7 @@ class MovementDetector:
             )
 
     def _draw_trajectory_on_frame(self, frame: np.ndarray):
-        for movement in self.movements:
+        for movement in self.detected_motions:
             if movement.amount_of_runs > self.max_amount_of_recorded_runs:
                 cv2.line(
                     frame,
