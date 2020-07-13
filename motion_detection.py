@@ -5,7 +5,7 @@ import cv2
 
 from constants import MAX_AMOUNT_OF_TRAINING_RUNS
 from src.paths import INPUT_PATH, OUTPUT_PATH
-from models import Movements
+from models import MovementDetector
 from video_utils import (
     get_videos_metadata,
     grayscale_frame,
@@ -27,7 +27,7 @@ def main():
     videos_metadata = get_videos_metadata(args.input_path, args.output_path)
     max_amount_of_recorded_runs = args.recorded_runs
 
-    movements = Movements(
+    movement_detector = MovementDetector(
         first_frame=videos_metadata.first_frame,
         max_amount_of_recorded_runs=max_amount_of_recorded_runs
     )
@@ -36,8 +36,8 @@ def main():
         frame = videos_metadata.input_video.read()[1]
         gray_frame = grayscale_frame(frame)
 
-        movements.detect_movement_on_frame(gray_frame, frame_index)
-        movements.add_movements_to_frame(frame)
+        movement_detector.detect_movement_on_frame(gray_frame, frame_index)
+        movement_detector.add_movements_to_frame(frame)
 
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -51,8 +51,8 @@ def main():
     videos_metadata.input_video.release()
     cv2.destroyAllWindows()
 
-    movements.draw_plots()
-    pprint(movements.generate_statistics())
+    movement_detector.draw_plots()
+    pprint(movement_detector.generate_statistics())
 
 
 if __name__ == "__main__":

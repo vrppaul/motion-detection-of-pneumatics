@@ -1,8 +1,10 @@
 import math
 import statistics
+from enum import Enum
 from typing import Callable, List, Optional, Set, Tuple, Dict
 
 import cv2
+import imutils
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -11,11 +13,20 @@ from constants import (
     DIRECTION_WINDOW_SIZE__ELEMENTS,
     DIRECTION_WINDOW_SIZE__PIXELS,
     DISTANCE_WINDOW_SIZE__PIXELS,
-    ENDPOINT_WINDOW_SIZE__ELEMENTS,
+    ENDPOINT_WINDOW_SIZE__ELEMENTS, THRESHOLD_VALUE,
 )
-from video_utils import get_rectangles
 
-LEFT, RIGHT = "left", "right"
+
+class Direction(Enum):
+    LEFT = "left"
+    RIGHT = "right"
+    UP = "up"
+    DOWN = "down"
+    LEFT_UP = "left up"
+    LEFT_DOWN = "left down"
+    RIGHT_UP = "right up"
+    RIGHT_DOWN = "right down"
+
 
 Rectangle = List[int]
 Point = Tuple[int, ...]
@@ -55,10 +66,13 @@ class Movement:
         self.amount_of_runs: int = 1
         self.current_median_position: float = 0
         self.median_position_history: List[float] = []
-        self.last_detected_endpoint: Optional[str] = None
+        self.last_detected_endpoint: Optional[Direction] = None
         self.most_left_points: Set[Point] = {(1000000, 1000000)}
         self.most_right_points: Set[Point] = {(-1000000, -1000000)}
-        self.movement_direction_history: List[str] = []
+        self.mass_center_history: List[Point] = []
+        self.movement_direction_history: List[Direction] = []
+        self.trajectory_left: Optional[Point] = None
+        self.trajectory_right: Optional[Point] = None
 
         x, y, w, h = initial_rectangle
         self.most_left_edge: int = x
@@ -90,26 +104,26 @@ class Movement:
             )
             self.median_position_history.append(current_median_position)
             if current_median_position - self.current_median_position > window_size_pixels:
-                self.movement_direction_history.append(RIGHT)
+                self.movement_direction_history.append(Direction.RIGHT)
                 self.current_median_position = current_median_position
             elif self.current_median_position - current_median_position > window_size_pixels:
-                self.movement_direction_history.append(LEFT)
+                self.movement_direction_history.append(Direction.LEFT)
                 self.current_median_position = current_median_position
 
     def detect_and_save_endpoint(self, window_size_elements: int):
         if len(self.movement_direction_history) > window_size_elements:
             right_directions = tuple(filter(
-                lambda direction: direction == RIGHT,
+                lambda direction: direction == Direction.RIGHT,
                 self.movement_direction_history[-window_size_elements:]
             ))
             if len(right_directions) > math.ceil(window_size_elements / 2):  # Most of records
-                if self.last_detected_endpoint == RIGHT:
+                if self.last_detected_endpoint == Direction.RIGHT:
                     self.amount_of_runs += 1
-                self.last_detected_endpoint = LEFT
+                self.last_detected_endpoint = Direction.LEFT
             else:
-                if self.last_detected_endpoint == LEFT:
+                if self.last_detected_endpoint == Direction.LEFT:
                     self.amount_of_runs += 1
-                self.last_detected_endpoint = RIGHT
+                self.last_detected_endpoint = Direction.RIGHT
 
     @staticmethod
     def find_distance(first_mc: Point, second_mc: Point) -> float:
@@ -125,6 +139,7 @@ class Movement:
         )
 
     def update_movement_history(self, mass_center: Point, iteration: int):
+        self.mass_center_history.append(mass_center)
         self.current_mass_center = mass_center
         self.movement_history[iteration - 1] = Movement.find_distance(self.initial_mass_center, mass_center)
 
@@ -138,7 +153,7 @@ class Movement:
         self._update_border_points()
         self._update_edges(rectangle)
 
-    def calculate_y_coordinate_on_borders(self) -> Tuple[int, int]:
+    def calculate_and_save_trajectory(self):
         most_left_point = tuple(np.median(tuple(self.most_left_points), axis=0).astype(int))
         most_right_point = tuple(np.median(tuple(self.most_right_points), axis=0).astype(int))
         coefficients = np.polyfit(
@@ -146,17 +161,32 @@ class Movement:
             (most_left_point[1], most_right_point[1]),
             1
         )
-        left_y = int(coefficients[0] * self.most_left_edge) + int(coefficients[1])
-        right_y = int(coefficients[0] * self.most_right_edge) + int(coefficients[1])
+        left_y = coefficients[0] * self.most_left_edge + coefficients[1]
+        left_y = min(max(left_y, self.most_upper_edge), self.most_lower_edge)
+        right_y = coefficients[0] * self.most_right_edge + coefficients[1]
+        right_y = min(max(right_y, self.most_upper_edge), self.most_lower_edge)
+        left_x = (left_y - coefficients[1]) / coefficients[0]
+        right_x = (right_y - coefficients[1]) / coefficients[0]
 
-        return left_y, right_y
+        self.trajectory_left = [int(left_x), int(left_y)]
+        self.trajectory_right = [int(right_x), int(right_y)]
 
     def generate_statistics(self) -> Dict:
         movement_statistics = {
             "amount_of_runs": self.amount_of_runs,
-            "movement_history": self.movement_direction_history
+            "movement_history": self._get_cleared_movement_history_for_statistics(),
+            "trajectory": [self.trajectory_left, self.trajectory_right],
         }
         return movement_statistics
+
+    def _get_cleared_movement_history_for_statistics(self):
+        cleaned_movement_direction_history = [[self.movement_direction_history[0], 1]]
+        for movement_direction in self.movement_direction_history[1:]:
+            if movement_direction == cleaned_movement_direction_history[-1][0]:
+                cleaned_movement_direction_history[-1][1] += 1
+            else:
+                cleaned_movement_direction_history.append([movement_direction, 1])
+        return cleaned_movement_direction_history
 
     def _update_border_points(self):
         def _get_extreme_from_border_points(min_max_callback: Callable, points: Set[Point]) -> Point:
@@ -186,7 +216,7 @@ class Movement:
             self.most_lower_edge = y + h
 
 
-class Movements:
+class MovementDetector:
     """
     This class contains all movement records and updates them.
     """
@@ -203,9 +233,10 @@ class Movements:
         self.movements: List[Movement] = []
 
         # Constants
-        self.direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
-        self.direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
-        self.endpoint_window_size_elements: int = ENDPOINT_WINDOW_SIZE__ELEMENTS
+        self._direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
+        self._direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
+        self._endpoint_window_size_elements: int = ENDPOINT_WINDOW_SIZE__ELEMENTS
+        self._threshold_value: int = THRESHOLD_VALUE
 
     def detect_movement_on_frame(
             self,
@@ -220,10 +251,10 @@ class Movements:
         :return:
         """
         self._update_all_existing_movements_with_zero_placeholder()
-        rectangles = get_rectangles(self.first_frame, gray_frame)
-        self._detect_and_update_closest_or_create_new(rectangles, frame_index)
+        self._detect_and_update_closest_or_create_new(gray_frame, frame_index)
         self._detect_and_save_directions()
         self._detect_and_save_endpoints()
+        self._calculate_and_save_trajectory()
 
     def add_movements_to_frame(self, frame: np.ndarray):
         self._draw_rectangles_on_frame(frame)
@@ -245,6 +276,20 @@ class Movements:
         }
         return all_movements_statistics
 
+    def _get_rectangles(self, current_frame: np.ndarray) -> List[List[int]]:
+        # compute the absolute difference between the current frame and
+        # first frame
+        frame_delta = cv2.absdiff(self.first_frame, current_frame)
+        thresh = cv2.threshold(frame_delta, self._threshold_value, 255, cv2.THRESH_BINARY)[1]
+        # dilate the threshold image to fill in holes, then find contours
+        # on threshold image
+        thresh = cv2.dilate(thresh, None, iterations=2)
+        contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = imutils.grab_contours(contours)
+        contours = filter(lambda contour: cv2.contourArea(contour) > 500, contours)
+        rectangles = list(map(lambda contour: cv2.boundingRect(contour), contours))
+        return rectangles
+
     def _update_all_existing_movements_with_zero_placeholder(self):
         """
         This function is needed to update a record, when no movement is detected,
@@ -254,17 +299,17 @@ class Movements:
         for movement in self.movements:
             movement.add_zero_placeholder()
 
-    def _detect_and_update_closest_or_create_new(self, rectangles: List[Rectangle], iteration: int):
+    def _detect_and_update_closest_or_create_new(self, gray_frame: np.ndarray, iteration: int):
         """
         Takes some mass center and iteration to either update existing record or to create new
         if no close (determined by closest_distance parameter in record class) records exist.
-        :param rectangles: List[List[int]]
-        Rectangles, which are detected at a given iteration.
+        :param gray_frame: np.ndarray
+        Fray frame from which rectangles will be extracted.
         :param iteration: int
         Number which determines at which place record should be updated
         :return: None
         """
-        rectangles_mass_centers = self._associate_mass_centers_to(rectangles)
+        rectangles_mass_centers = self._get_rectangles_mass_centers(gray_frame)
         for rect_mass_center in rectangles_mass_centers:
             found = self._existing_movement_found_and_updated(rect_mass_center, iteration)
             if not found:
@@ -307,10 +352,8 @@ class Movements:
             )
         )
 
-    def _associate_mass_centers_to(
-            self,
-            rectangles: List[Rectangle]
-    ) -> List[Tuple[Rectangle, Point]]:
+    def _get_rectangles_mass_centers(self, gray_frame: np.ndarray) -> List[Tuple[Rectangle, Point]]:
+        rectangles = self._get_rectangles(gray_frame)
         return list(map(
             lambda rectangle: (rectangle, (rectangle[0] + rectangle[2] // 2, rectangle[1] + rectangle[3] // 2)),
             rectangles
@@ -326,8 +369,8 @@ class Movements:
         """
         for movement in self.movements:
             movement.detect_and_save_direction(
-                self.direction_window_size_elements,
-                self.direction_window_size_pixels
+                self._direction_window_size_elements,
+                self._direction_window_size_pixels
             )
 
     def _detect_and_save_endpoints(self):
@@ -341,7 +384,12 @@ class Movements:
         :return:
         """
         for movement in self.movements:
-            movement.detect_and_save_endpoint(self.endpoint_window_size_elements)
+            movement.detect_and_save_endpoint(self._endpoint_window_size_elements)
+
+    def _calculate_and_save_trajectory(self):
+        for movement in self.movements:
+            if movement.amount_of_runs == self.max_amount_of_recorded_runs + 1:
+                movement.calculate_and_save_trajectory()
 
     def _draw_rectangles_on_frame(self, frame: np.ndarray):
         for movement in self.movements:
@@ -363,11 +411,10 @@ class Movements:
     def _draw_trajectory_on_frame(self, frame: np.ndarray):
         for movement in self.movements:
             if movement.amount_of_runs > self.max_amount_of_recorded_runs:
-                left_y, right_y = movement.calculate_y_coordinate_on_borders()
                 cv2.line(
                     frame,
-                    (movement.most_left_edge, left_y),
-                    (movement.most_right_edge, right_y),
+                    (movement.trajectory_left[0], movement.trajectory_left[1]),
+                    (movement.trajectory_right[0], movement.trajectory_right[1]),
                     (0, 255, 0),
                     4
                 )
