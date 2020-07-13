@@ -12,7 +12,7 @@ from constants import (
     AMOUNT_OF_BORDER_POINTS,
     DIRECTION_WINDOW_SIZE__ELEMENTS,
     DIRECTION_WINDOW_SIZE__PIXELS,
-    DISTANCE_WINDOW_SIZE__PIXELS,
+    DETECT_MOTION_WINDOW_SIZE,
     ENDPOINT_WINDOW_SIZE__ELEMENTS, THRESHOLD_VALUE,
 )
 
@@ -33,6 +33,9 @@ Point = Tuple[int, ...]
 
 
 class Motion:
+    # Constants
+    detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
+    amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
     """
     This class is required to track mass centers of all pneumatics'
     detected rectangles of motion.
@@ -80,14 +83,10 @@ class Motion:
         self.most_upper_edge: int = y
         self.most_lower_edge: int = y + h
 
-        # Constants
-        self.distance_window_size_pixels: int = DISTANCE_WINDOW_SIZE__PIXELS
-        self.amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
-
     def add_zero_placeholder(self):
         self.motion_history.append(0)
 
-    def check_if_closest_mass_distance(self, mass_center: Point):
+    def is_closest_mass_distance(self, mass_center: Point):
         """
         Evaluates whether given mass_center corresponds to this
         record by measuring current_mass_center and given mass_center euclidean distance.
@@ -95,7 +94,7 @@ class Motion:
         :param mass_center: List[float]
         :return: bool
         """
-        return self.find_distance(self.current_mass_center, mass_center) < self.distance_window_size_pixels
+        return self.find_distance(self.current_mass_center, mass_center) < Motion.detect_motion_window_size
 
     def detect_and_save_direction(self, window_size_elements: int, window_size_pixels: int):
         if len(self.motion_history) > window_size_elements:
@@ -198,11 +197,11 @@ class Motion:
 
         if self.current_mass_center[0] < max_of_most_left_points[0]:
             self.most_left_points.add(self.current_mass_center)
-            if len(self.most_left_points) > self.amount_of_border_points:
+            if len(self.most_left_points) > Motion.amount_of_border_points:
                 self.most_left_points.remove(max_of_most_left_points)
         if self.current_mass_center[0] > min_of_most_right_points[0]:
             self.most_right_points.add(self.current_mass_center)
-            if len(self.most_right_points) > self.amount_of_border_points:
+            if len(self.most_right_points) > Motion.amount_of_border_points:
                 self.most_right_points.remove(min_of_most_right_points)
 
     def _update_edges(self, rectangle: Rectangle):
@@ -300,47 +299,49 @@ class MotionDetector:
         for motion in self.detected_motions:
             motion.add_zero_placeholder()
 
-    def _detect_and_update_closest_or_create_new(self, gray_frame: np.ndarray, iteration: int):
+    def _detect_and_update_closest_or_create_new(self, gray_frame: np.ndarray, frame_index: int):
         """
-        Takes some mass center and iteration to either update existing record or to create new
+        Takes some mass center and frame_index to either update existing record or to create new
         if no close (determined by closest_distance parameter in record class) records exist.
         :param gray_frame: np.ndarray
         Fray frame from which rectangles will be extracted.
-        :param iteration: int
+        :param frame_index: int
         Number which determines at which place record should be updated
         :return: None
         """
         rectangles_mass_centers = self._get_rectangles_mass_centers(gray_frame)
         for rect_mass_center in rectangles_mass_centers:
-            found = self._existing_motion_found_and_updated(rect_mass_center, iteration)
+            found = self._existing_motion_found_and_updated(rect_mass_center, frame_index)
             if not found:
-                self._create_new_motion(rect_mass_center, iteration)
+                self._create_new_motion(rect_mass_center, frame_index)
 
     def _existing_motion_found_and_updated(
             self,
             rect_mass_center: Tuple[Rectangle, Point],
-            iteration: int
+            frame_index: int
     ) -> bool:
         """
         Check all existing motions. Return True if given mass center corresponds to any motion.
         Otherwise return False
         :param rect_mass_center:
-        :param iteration:
+        :param frame_index:
         :return: bool
         """
+        rectangle = rect_mass_center[0]
+        mass_center = rect_mass_center[1]
         for motion in self.detected_motions:
-            if motion.check_if_closest_mass_distance(rect_mass_center[1]):
+            if motion.is_closest_mass_distance(mass_center):
                 if motion.amount_of_runs <= self.max_amount_of_recorded_runs:
-                    motion.update_record_data(rect_mass_center[0])
-                motion.update_motion_history(rect_mass_center[1], iteration)
+                    motion.update_record_data(rectangle)
+                motion.update_motion_history(mass_center, frame_index)
                 return True
         return False
 
-    def _create_new_motion(self, rect_mass_center: Tuple[Rectangle, Point], iteration: int):
+    def _create_new_motion(self, rect_mass_center: Tuple[Rectangle, Point], frame_index: int):
         """
         If no existing motions were detected, create new motion
         :param rect_mass_center:
-        :param iteration:
+        :param frame_index:
         :return:
         """
         new_record_id = len(self.detected_motions)
@@ -349,7 +350,7 @@ class MotionDetector:
                 new_record_id,
                 rect_mass_center[0],
                 rect_mass_center[1],
-                [0] * iteration
+                [0] * frame_index
             )
         )
 
