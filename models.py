@@ -78,6 +78,11 @@ class Orientation(Enum):
         return not self.is_vertical()
 
 
+class MotionType(Enum):
+    MOTOR = "motor"
+    BLINKER = "blinker"
+
+
 Rectangle = List[int]
 Point = Tuple[int, ...]
 
@@ -167,7 +172,7 @@ class Motion:
         :return: bool
         """
         return _find_distance(self.current_mass_center, mass_center) < Motion._detect_motion_window_size \
-            or self._is_inside_boundaries(mass_center)
+            or self._is_inside_boundaries_with_tolerance(mass_center, Motion._detect_motion_window_size)
 
     def update_record_data(self, rectangle: Rectangle, mass_center: Point, frame_index: int):
         """
@@ -191,9 +196,9 @@ class Motion:
             if self.amount_of_runs == Motion.max_amount_of_recorded_runs:
                 self._calculate_and_save_trajectory()
 
-    def _is_inside_boundaries(self, mass_center: Point) -> bool:
-        return self.most_left_edge < mass_center[0] < self.most_right_edge \
-            and self.most_lower_edge < mass_center[1] < self.most_upper_edge
+    def _is_inside_boundaries_with_tolerance(self, mass_center: Point, tolerance: int) -> bool:
+        return self.most_left_edge - tolerance < mass_center[0] < self.most_right_edge + tolerance \
+            and self.most_upper_edge - tolerance < mass_center[1] < self.most_lower_edge + tolerance
 
     def _update_motion_history(self, mass_center: Point, frame_index: int):
         self.mass_center_history.append(mass_center)
@@ -279,6 +284,7 @@ class Motion:
             most_down_point, most_up_point = self._calculate_median_border_point(
                 self.most_down_points, self.most_up_points
             )
+            # TODO: compare to classical approach
             coefficients = np.polyfit(
                 (most_down_point[0], most_up_point[0]),
                 (most_down_point[1], most_up_point[1]),
@@ -293,8 +299,9 @@ class Motion:
             self.trajectory_from = (int(down_x), int(down_y))
             self.trajectory_to = (int(up_x), int(up_y))
         else:
-            most_left_point = tuple(np.median(tuple(self.most_left_points), axis=0).astype(int))
-            most_right_point = tuple(np.median(tuple(self.most_right_points), axis=0).astype(int))
+            most_left_point, most_right_point = self._calculate_median_border_point(
+                self.most_left_points, self.most_right_points
+            )
             coefficients = np.polyfit(
                 (most_left_point[0], most_right_point[0]),
                 (most_left_point[1], most_right_point[1]),
@@ -407,9 +414,6 @@ class MotionDetector:
         """
         self._update_all_existing_motions_with_zero_placeholder()
         self._detect_and_update_existing_motions_or_create_new(gray_frame, frame_index)
-        # self._detect_and_save_directions(detected_motions)
-        # self._detect_and_save_endpoints()
-        # self._calculate_and_save_trajectory()
 
     def draw_motions_on_frame(self, frame: np.ndarray):
         self._draw_rectangles_on_frame(frame)
@@ -441,7 +445,7 @@ class MotionDetector:
         thresh = cv2.dilate(thresh, None, iterations=2)
         contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contours = imutils.grab_contours(contours)
-        contours = filter(lambda contour: cv2.contourArea(contour) > 500, contours)
+        contours = filter(lambda contour: cv2.contourArea(contour) > 20, contours)
         rectangles = list(map(lambda contour: cv2.boundingRect(contour), contours))
         return rectangles
 
