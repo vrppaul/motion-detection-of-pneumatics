@@ -103,7 +103,7 @@ def _find_distance(first_mc: Point, second_mc: Point) -> float:
 class Motion:
     # Constants
     _amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
-    _amount_of_rectangles_for_orientation_detection: int = 10
+    _min_amount_of_rectangles_for_properties_detection: int = 10
     _detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
     _direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
     _direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
@@ -153,6 +153,7 @@ class Motion:
         self.trajectory_from: Optional[Point] = None
         self.trajectory_to: Optional[Point] = None
         self.orientation: Optional[Orientation] = None
+        self.motion_type: Optional[MotionType] = None
 
         x, y, w, h = initial_rectangle
         self.most_left_edge: int = x
@@ -162,17 +163,6 @@ class Motion:
 
     def add_zero_placeholder(self):
         self.motion_history.append(0)
-
-    def is_closest_mass_distance(self, mass_center: Point):
-        """
-        Evaluates whether given mass_center corresponds to this
-        record by measuring current_mass_center and given mass_center euclidean distance.
-
-        :param mass_center: List[float]
-        :return: bool
-        """
-        return _find_distance(self.current_mass_center, mass_center) < Motion._detect_motion_window_size \
-            or self._is_inside_boundaries_with_tolerance(mass_center, Motion._detect_motion_window_size)
 
     def update_record_data(self, rectangle: Rectangle, mass_center: Point, frame_index: int):
         """
@@ -184,6 +174,7 @@ class Motion:
         :return:
         """
         self._update_motion_history(mass_center, frame_index)
+        self._detect_motion_type()
         if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
             self._update_edges(rectangle)
         if self.orientation is None:
@@ -196,6 +187,17 @@ class Motion:
             if self.amount_of_runs == Motion.max_amount_of_recorded_runs:
                 self._calculate_and_save_trajectory()
 
+    def is_closest_mass_distance(self, mass_center: Point):
+        """
+        Evaluates whether given mass_center corresponds to this
+        record by measuring current_mass_center and given mass_center euclidean distance.
+
+        :param mass_center: List[float]
+        :return: bool
+        """
+        return _find_distance(self.current_mass_center, mass_center) < Motion._detect_motion_window_size \
+            or self._is_inside_boundaries_with_tolerance(mass_center, Motion._detect_motion_window_size)
+
     def _is_inside_boundaries_with_tolerance(self, mass_center: Point, tolerance: int) -> bool:
         return self.most_left_edge - tolerance < mass_center[0] < self.most_right_edge + tolerance \
             and self.most_upper_edge - tolerance < mass_center[1] < self.most_lower_edge + tolerance
@@ -205,9 +207,22 @@ class Motion:
         self.current_mass_center = mass_center
         self.motion_history[frame_index - 1] = _find_distance(self.initial_mass_center, mass_center)
 
+    def _detect_motion_type(self):
+        if len(self.mass_center_history) == Motion._min_amount_of_rectangles_for_properties_detection:
+            amount_of_zero = len(list(filter(
+                lambda distance: distance == 0,
+                self.motion_history[-Motion._min_amount_of_rectangles_for_properties_detection:]
+            )))
+            if amount_of_zero > math.ceil(Motion._min_amount_of_rectangles_for_properties_detection / 2):
+                self.motion_type = MotionType.BLINKER
+            else:
+                self.motion_type = MotionType.MOTOR
+
     def _detect_orientation(self):
+        if self.motion_type is MotionType.BLINKER:
+            return
         amount_non_null_elements = len(self.mass_center_history)
-        if amount_non_null_elements == Motion._amount_of_rectangles_for_orientation_detection:
+        if amount_non_null_elements == Motion._min_amount_of_rectangles_for_properties_detection:
             if self.most_right_edge - self.most_left_edge > self.most_lower_edge - self.most_upper_edge:
                 self.orientation = Orientation.HORIZONTAL
             else:
@@ -275,7 +290,7 @@ class Motion:
             most_often = Counter(transformed_directions).most_common()[0][0]
             if self.last_detected_endpoint is None:
                 self.last_detected_endpoint = most_often.opposite
-            if self.last_detected_endpoint == most_often:
+            if self.last_detected_endpoint.is_same(most_often):
                 self.amount_of_runs += 1
                 self.last_detected_endpoint = most_often.opposite
 
@@ -324,11 +339,20 @@ class Motion:
     def generate_statistics(self) -> Dict[str, Any]:
         motion_statistics = {
             "id": self.record_id,
-            "amount_of_runs": self.amount_of_runs,
-            "motion_history": self._get_cleared_motion_history_for_statistics(),
-            "trajectory": [self.trajectory_from, self.trajectory_to],
-            "orientation": self.orientation,
+            "motion_type": self.motion_type,
         }
+        if self.motion_type is MotionType.MOTOR:
+            specific_statistics = {
+                "amount_of_runs": self.amount_of_runs,
+                "motion_history": self._get_cleared_motion_history_for_statistics(),
+                "trajectory": [self.trajectory_from, self.trajectory_to],
+                "orientation": self.orientation,
+            }
+        else:
+            specific_statistics = {
+                "location": self.initial_mass_center
+            }
+        motion_statistics.update(specific_statistics)
         return motion_statistics
 
     def _get_cleared_motion_history_for_statistics(self):
@@ -535,10 +559,10 @@ class MotionDetector:
             )
             cv2.putText(
                 img=frame,
-                text=f"{motion.record_id}",
-                org=(motion.most_right_edge - 10, motion.most_upper_edge - 10),
+                text=f"{motion.record_id}: {motion.motion_type.value if motion.motion_type else ''}",
+                org=(motion.most_left_edge, motion.most_upper_edge - 10),
                 fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=0.5,
+                fontScale=0.3,
                 color=(0, 255, 0),
                 thickness=1,
                 lineType=cv2.LINE_AA
