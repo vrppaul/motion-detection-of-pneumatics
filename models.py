@@ -2,7 +2,7 @@ import math
 import statistics
 from collections import Counter
 from enum import Enum
-from typing import Callable, List, Optional, Set, Tuple, Dict
+from typing import Callable, List, Optional, Set, Tuple, Dict, Any
 
 import cv2
 import imutils
@@ -141,10 +141,12 @@ class Motion:
         self.last_detected_endpoint: Optional[Direction] = None
         self.most_left_points: Set[Point] = {(1000000, 1000000)}
         self.most_right_points: Set[Point] = {(-1000000, -1000000)}
+        self.most_down_points: Set[Point] = {(-1000000, -1000000)}
+        self.most_up_points: Set[Point] = {(1000000, 1000000)}
         self.mass_center_history: List[Point] = []
         self.motion_direction_history: List[Direction] = []
-        self.trajectory_left: Optional[Point] = None
-        self.trajectory_right: Optional[Point] = None
+        self.trajectory_from: Optional[Point] = None
+        self.trajectory_to: Optional[Point] = None
         self.orientation: Optional[Orientation] = None
 
         x, y, w, h = initial_rectangle
@@ -178,11 +180,12 @@ class Motion:
         """
         self._update_motion_history(mass_center, frame_index)
         if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
-            self._update_border_points()
             self._update_edges(rectangle)
         if self.orientation is None:
             self._detect_orientation()
         else:
+            if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
+                self._update_border_points()
             self._detect_and_save_direction()
             self._detect_and_save_endpoint()
             if self.amount_of_runs == Motion.max_amount_of_recorded_runs:
@@ -264,40 +267,59 @@ class Motion:
                 transformed_directions = [
                     Direction.LEFT if direction.is_left() else Direction.RIGHT for direction in last_directions
                 ]
-            most_often = self._filter_most_elements(transformed_directions)
+            most_often = Counter(transformed_directions).most_common()[0][0]
             if self.last_detected_endpoint is None:
                 self.last_detected_endpoint = most_often.opposite
             if self.last_detected_endpoint == most_often:
                 self.amount_of_runs += 1
                 self.last_detected_endpoint = most_often.opposite
 
-    def _filter_most_elements(self, directions: List[Direction]):
-        return Counter(directions).most_common()[0][0]
-
     def _calculate_and_save_trajectory(self):
-        most_left_point = tuple(np.median(tuple(self.most_left_points), axis=0).astype(int))
-        most_right_point = tuple(np.median(tuple(self.most_right_points), axis=0).astype(int))
-        coefficients = np.polyfit(
-            (most_left_point[0], most_right_point[0]),
-            (most_left_point[1], most_right_point[1]),
-            1
-        )
-        left_y = coefficients[0] * self.most_left_edge + coefficients[1]
-        left_y = min(max(left_y, self.most_upper_edge), self.most_lower_edge)
-        right_y = coefficients[0] * self.most_right_edge + coefficients[1]
-        right_y = min(max(right_y, self.most_upper_edge), self.most_lower_edge)
-        left_x = (left_y - coefficients[1]) / coefficients[0]
-        right_x = (right_y - coefficients[1]) / coefficients[0]
+        if self.orientation.is_vertical():
+            most_down_point, most_up_point = self._calculate_median_border_point(
+                self.most_down_points, self.most_up_points
+            )
+            coefficients = np.polyfit(
+                (most_down_point[0], most_up_point[0]),
+                (most_down_point[1], most_up_point[1]),
+                1
+            )
+            down_x = (self.most_lower_edge - coefficients[1]) / coefficients[0]
+            down_x = min(max(down_x, self.most_left_edge), self.most_right_edge)
+            up_x = (self.most_upper_edge - coefficients[1]) / coefficients[0]
+            up_x = min(max(up_x, self.most_left_edge), self.most_right_edge)
+            down_y = down_x * coefficients[0] + coefficients[1]
+            up_y = up_x * coefficients[0] + coefficients[1]
+            self.trajectory_from = (int(down_x), int(down_y))
+            self.trajectory_to = (int(up_x), int(up_y))
+        else:
+            most_left_point = tuple(np.median(tuple(self.most_left_points), axis=0).astype(int))
+            most_right_point = tuple(np.median(tuple(self.most_right_points), axis=0).astype(int))
+            coefficients = np.polyfit(
+                (most_left_point[0], most_right_point[0]),
+                (most_left_point[1], most_right_point[1]),
+                1
+            )
+            left_y = coefficients[0] * self.most_left_edge + coefficients[1]
+            left_y = min(max(left_y, self.most_upper_edge), self.most_lower_edge)
+            right_y = coefficients[0] * self.most_right_edge + coefficients[1]
+            right_y = min(max(right_y, self.most_upper_edge), self.most_lower_edge)
+            left_x = (left_y - coefficients[1]) / coefficients[0]
+            right_x = (right_y - coefficients[1]) / coefficients[0]
+            self.trajectory_from = (int(left_x), int(left_y))
+            self.trajectory_to = (int(right_x), int(right_y))
 
-        self.trajectory_left = [int(left_x), int(left_y)]
-        self.trajectory_right = [int(right_x), int(right_y)]
+    def _calculate_median_border_point(self, down_or_left_points: Set[Point], up_or_right_points: Set[Point]):
+        from_ = tuple(np.median(tuple(down_or_left_points), axis=0).astype(int))
+        to_ = tuple(np.median(tuple(up_or_right_points), axis=0).astype(int))
+        return from_, to_
 
-    def generate_statistics(self) -> Dict:
+    def generate_statistics(self) -> Dict[str, Any]:
         motion_statistics = {
             "id": self.record_id,
             "amount_of_runs": self.amount_of_runs,
             "motion_history": self._get_cleared_motion_history_for_statistics(),
-            "trajectory": [self.trajectory_left, self.trajectory_right],
+            "trajectory": [self.trajectory_from, self.trajectory_to],
             "orientation": self.orientation,
         }
         return motion_statistics
@@ -312,20 +334,33 @@ class Motion:
         return cleaned_motion_direction_history
 
     def _update_border_points(self):
+        if self.orientation.is_vertical():
+            self._update_vertical_border_points()
+        else:
+            self._update_horizontal_border_points()
+
+    # FIXME: maybe better name would be left_or_up and right_or_down
+    def _update_any_orientation_points(self, points_of_max: Set[Point], points_of_min: Set[Point], axis: int):
         def _get_extreme_from_border_points(min_max_callback: Callable, points: Set[Point]) -> Point:
-            return min_max_callback(points, key=lambda point: point[0])
+            return min_max_callback(points, key=lambda point: point[axis])
 
-        max_of_most_left_points = _get_extreme_from_border_points(max, self.most_left_points)
-        min_of_most_right_points = _get_extreme_from_border_points(min, self.most_right_points)
+        max_of_points = _get_extreme_from_border_points(max, points_of_max)
+        min_of_points = _get_extreme_from_border_points(min, points_of_min)
 
-        if self.current_mass_center[0] < max_of_most_left_points[0]:
-            self.most_left_points.add(self.current_mass_center)
-            if len(self.most_left_points) > Motion._amount_of_border_points:
-                self.most_left_points.remove(max_of_most_left_points)
-        if self.current_mass_center[0] > min_of_most_right_points[0]:
-            self.most_right_points.add(self.current_mass_center)
-            if len(self.most_right_points) > Motion._amount_of_border_points:
-                self.most_right_points.remove(min_of_most_right_points)
+        if self.current_mass_center[axis] < max_of_points[axis]:
+            points_of_max.add(self.current_mass_center)
+            if len(points_of_max) > Motion._amount_of_border_points:
+                points_of_max.remove(max_of_points)
+        if self.current_mass_center[axis] > min_of_points[axis]:
+            points_of_min.add(self.current_mass_center)
+            if len(points_of_min) > Motion._amount_of_border_points:
+                points_of_min.remove(min_of_points)
+
+    def _update_horizontal_border_points(self):
+        self._update_any_orientation_points(self.most_left_points, self.most_right_points, 0)
+
+    def _update_vertical_border_points(self):
+        self._update_any_orientation_points(self.most_up_points, self.most_down_points, 1)
 
     def _update_edges(self, rectangle: Rectangle):
         x, y, w, h = rectangle
@@ -378,7 +413,7 @@ class MotionDetector:
 
     def draw_motions_on_frame(self, frame: np.ndarray):
         self._draw_rectangles_on_frame(frame)
-        # self._draw_trajectory_on_frame(frame)
+        self._draw_trajectory_on_frame(frame)
 
     def draw_plots(self):
         fig = plt.figure()
@@ -507,11 +542,11 @@ class MotionDetector:
 
     def _draw_trajectory_on_frame(self, frame: np.ndarray):
         for motion in self.detected_motions:
-            if motion.amount_of_runs > self.max_amount_of_recorded_runs:
+            if motion.amount_of_runs > Motion.max_amount_of_recorded_runs:
                 cv2.line(
                     frame,
-                    (motion.trajectory_left[0], motion.trajectory_left[1]),
-                    (motion.trajectory_right[0], motion.trajectory_right[1]),
+                    motion.trajectory_from,
+                    motion.trajectory_to,
                     (0, 255, 0),
                     4
                 )
