@@ -27,7 +27,7 @@ def get_videos_metadata(input_path: str, output_path: str) -> VideosMetadata:
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     output_video = cv2.VideoWriter(output_path, fourcc, fps, (width, height), True)
 
-    # -1 since we've already parsed first frame
+    # -1 since we've already parsed the first frame
     frames_number = int(input_video.get(cv2.CAP_PROP_FRAME_COUNT)) - 1
 
     return VideosMetadata(input_video, output_video, first_frame, frames_number)

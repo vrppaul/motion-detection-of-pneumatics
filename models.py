@@ -1,5 +1,6 @@
 import math
 import statistics
+from collections import Counter
 from enum import Enum
 from typing import Callable, List, Optional, Set, Tuple, Dict
 
@@ -18,24 +19,91 @@ from constants import (
 
 
 class Direction(Enum):
-    LEFT = "left"
-    RIGHT = "right"
-    UP = "up"
-    DOWN = "down"
-    LEFT_UP = "left up"
-    LEFT_DOWN = "left down"
-    RIGHT_UP = "right up"
-    RIGHT_DOWN = "right down"
+    LEFT = 2
+    RIGHT = 3
+    UP = 5
+    DOWN = 7
+    LEFT_UP = 10
+    LEFT_DOWN = 14
+    RIGHT_UP = 15
+    RIGHT_DOWN = 21
+
+    def is_direction(self, direction: 'Direction') -> bool:
+        return self.value % direction.value == 0
+
+    def is_left(self) -> bool:
+        return self.is_direction(Direction.LEFT)
+
+    def is_right(self) -> bool:
+        return self.is_direction(Direction.RIGHT)
+
+    def is_up(self) -> bool:
+        return self.is_direction(Direction.UP)
+
+    def is_down(self) -> bool:
+        return self.is_direction(Direction.DOWN)
+
+    def is_same(self, another: 'Direction') -> bool:
+        if self.is_up() and another.is_up():
+            return True
+        if self.is_down() and another.is_down():
+            return True
+        if self.is_left() and another.is_left():
+            return True
+        if self.is_right() and another.is_right():
+            return True
+
+    @property
+    def opposite(self) -> 'Direction':
+        if self.is_left():
+            return Direction.RIGHT
+        elif self.is_right():
+            return Direction.LEFT
+        elif self.is_up():
+            return Direction.DOWN
+        elif self.is_down():
+            return Direction.UP
+        else:
+            raise ValueError("Please provide the correct direction type")
+
+
+class Orientation(Enum):
+    VERTICAL = "vertical"
+    HORIZONTAL = "horizontal"
+
+    def is_vertical(self):
+        return self is Orientation.VERTICAL
+
+    def is_horizontal(self):
+        return not self.is_vertical()
 
 
 Rectangle = List[int]
 Point = Tuple[int, ...]
 
 
+def _find_distance(first_mc: Point, second_mc: Point) -> float:
+    """
+    Measures euclidean between two mass centers
+
+    :param first_mc: List[float]
+    :param second_mc: List[float]
+    :return: float
+    """
+    return math.sqrt(
+        (first_mc[0] - second_mc[0]) ** 2 + (first_mc[1] - second_mc[1]) ** 2
+    )
+
+
 class Motion:
     # Constants
-    detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
-    amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
+    _amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
+    _amount_of_rectangles_for_orientation_detection: int = 10
+    _detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
+    _direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
+    _direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
+    _endpoint_window_size_elements: int = ENDPOINT_WINDOW_SIZE__ELEMENTS
+    max_amount_of_recorded_runs: int
     """
     This class is required to track mass centers of all pneumatics'
     detected rectangles of motion.
@@ -68,6 +136,7 @@ class Motion:
         # Initializing implicit arguments
         self.amount_of_runs: int = 1
         self.current_median_position: float = 0
+        self.current_median_mass_center: Point = initial_mass_center
         self.median_position_history: List[float] = []
         self.last_detected_endpoint: Optional[Direction] = None
         self.most_left_points: Set[Point] = {(1000000, 1000000)}
@@ -76,6 +145,7 @@ class Motion:
         self.motion_direction_history: List[Direction] = []
         self.trajectory_left: Optional[Point] = None
         self.trajectory_right: Optional[Point] = None
+        self.orientation: Optional[Orientation] = None
 
         x, y, w, h = initial_rectangle
         self.most_left_edge: int = x
@@ -94,65 +164,117 @@ class Motion:
         :param mass_center: List[float]
         :return: bool
         """
-        return self.find_distance(self.current_mass_center, mass_center) < Motion.detect_motion_window_size
+        return _find_distance(self.current_mass_center, mass_center) < Motion._detect_motion_window_size \
+            or self._is_inside_boundaries(mass_center)
 
-    def detect_and_save_direction(self, window_size_elements: int, window_size_pixels: int):
-        if len(self.motion_history) > window_size_elements:
-            current_median_position = statistics.median(
-                self.motion_history[-window_size_elements:]  # Last elements
-            )
-            self.median_position_history.append(current_median_position)
-            if current_median_position - self.current_median_position > window_size_pixels:
-                self.motion_direction_history.append(Direction.RIGHT)
-                self.current_median_position = current_median_position
-            elif self.current_median_position - current_median_position > window_size_pixels:
-                self.motion_direction_history.append(Direction.LEFT)
-                self.current_median_position = current_median_position
-
-    def detect_and_save_endpoint(self, window_size_elements: int):
-        if len(self.motion_direction_history) > window_size_elements:
-            right_directions = tuple(filter(
-                lambda direction: direction == Direction.RIGHT,
-                self.motion_direction_history[-window_size_elements:]
-            ))
-            if len(right_directions) > math.ceil(window_size_elements / 2):  # Most of records
-                if self.last_detected_endpoint == Direction.RIGHT:
-                    self.amount_of_runs += 1
-                self.last_detected_endpoint = Direction.LEFT
-            else:
-                if self.last_detected_endpoint == Direction.LEFT:
-                    self.amount_of_runs += 1
-                self.last_detected_endpoint = Direction.RIGHT
-
-    @staticmethod
-    def find_distance(first_mc: Point, second_mc: Point) -> float:
-        """
-        Measures euclidean between two mass centers
-
-        :param first_mc: List[float]
-        :param second_mc: List[float]
-        :return: float
-        """
-        return math.sqrt(
-            (first_mc[0] - second_mc[0]) ** 2 + (first_mc[1] - second_mc[1]) ** 2
-        )
-
-    def update_motion_history(self, mass_center: Point, iteration: int):
-        self.mass_center_history.append(mass_center)
-        self.current_mass_center = mass_center
-        self.motion_history[iteration - 1] = Motion.find_distance(self.initial_mass_center, mass_center)
-
-    def update_record_data(self, rectangle: Rectangle):
+    def update_record_data(self, rectangle: Rectangle, mass_center: Point, frame_index: int):
         """
         If given mass_center corresponds to this record, this function updates
         all parameters of this record.
+        :param frame_index:
+        :param mass_center:
         :param rectangle:
         :return:
         """
-        self._update_border_points()
-        self._update_edges(rectangle)
+        self._update_motion_history(mass_center, frame_index)
+        if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
+            self._update_border_points()
+            self._update_edges(rectangle)
+        if self.orientation is None:
+            self._detect_orientation()
+        else:
+            self._detect_and_save_direction()
+            self._detect_and_save_endpoint()
+            if self.amount_of_runs == Motion.max_amount_of_recorded_runs:
+                self._calculate_and_save_trajectory()
 
-    def calculate_and_save_trajectory(self):
+    def _is_inside_boundaries(self, mass_center: Point) -> bool:
+        return self.most_left_edge < mass_center[0] < self.most_right_edge \
+            and self.most_lower_edge < mass_center[1] < self.most_upper_edge
+
+    def _update_motion_history(self, mass_center: Point, frame_index: int):
+        self.mass_center_history.append(mass_center)
+        self.current_mass_center = mass_center
+        self.motion_history[frame_index - 1] = _find_distance(self.initial_mass_center, mass_center)
+
+    def _detect_orientation(self):
+        amount_non_null_elements = len(self.mass_center_history)
+        if amount_non_null_elements == Motion._amount_of_rectangles_for_orientation_detection:
+            if self.most_right_edge - self.most_left_edge > self.most_lower_edge - self.most_upper_edge:
+                self.orientation = Orientation.HORIZONTAL
+            else:
+                self.orientation = Orientation.VERTICAL
+
+    def _detect_and_save_direction(self):
+        if len(self.mass_center_history) > Motion._direction_window_size_elements:
+            current_median_position = statistics.mean(
+                self.motion_history[-Motion._direction_window_size_elements:]
+            )
+            current_median_x_coordinate = statistics.mean(
+                [mass_center[0] for mass_center in self.mass_center_history[-Motion._direction_window_size_elements:]]
+            )
+            current_median_y_coordinate = statistics.mean(
+                [mass_center[1] for mass_center in self.mass_center_history[-Motion._direction_window_size_elements:]]
+            )
+            self.median_position_history.append(current_median_position)
+            if abs(current_median_position - self.current_median_position) > Motion._direction_window_size_pixels:
+                diff_x = current_median_x_coordinate - self.current_median_mass_center[0]
+                diff_y = current_median_y_coordinate - self.current_median_mass_center[1]
+
+                if diff_x > 0:
+                    if diff_y < 0:
+                        self.motion_direction_history.append(Direction.RIGHT_UP)
+                    elif diff_y == 0:
+                        self.motion_direction_history.append(Direction.RIGHT)
+                    else:
+                        self.motion_direction_history.append(Direction.RIGHT_DOWN)
+                elif diff_x == 0:
+                    if diff_y < 0:
+                        self.motion_direction_history.append(Direction.UP)
+                    else:
+                        self.motion_direction_history.append(Direction.DOWN)
+                else:
+                    if diff_y < 0:
+                        self.motion_direction_history.append(Direction.LEFT_UP)
+                    elif diff_y == 0:
+                        self.motion_direction_history.append(Direction.LEFT)
+                    else:
+                        self.motion_direction_history.append(Direction.LEFT_DOWN)
+
+                self.current_median_mass_center = (current_median_x_coordinate, current_median_y_coordinate)
+                self.current_median_position = current_median_position
+
+    def _detect_and_save_endpoint(self):
+        """
+        Imagine the following situation. Motor is going from left to right,
+        thus previously detected endpoint should be LEFT (motor previously reached left side of its path).
+        motion_direction_history is [RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, ...]
+        Then when most of elements in motion_direction_history is LEFT and last detected endpoint is LEFT as well,
+        that would mean that now motor is going back and it reached the RIGHT endpoint and since it did the whole cycle
+        add 1 to amount of runs
+        :return:
+        """
+        if len(self.motion_direction_history) > Motion._endpoint_window_size_elements:
+            last_directions = self.motion_direction_history[-Motion._endpoint_window_size_elements:]
+            if self.orientation.is_vertical():
+                transformed_directions = [
+                    Direction.DOWN if direction.is_down() else Direction.UP for direction in last_directions
+                ]
+            else:
+                transformed_directions = [
+                    Direction.LEFT if direction.is_left() else Direction.RIGHT for direction in last_directions
+                ]
+            most_often = self._filter_most_elements(transformed_directions)
+            if self.last_detected_endpoint is None:
+                self.last_detected_endpoint = most_often.opposite
+            if self.last_detected_endpoint == most_often:
+                self.amount_of_runs += 1
+                self.last_detected_endpoint = most_often.opposite
+
+    def _filter_most_elements(self, directions: List[Direction]):
+        return Counter(directions).most_common()[0][0]
+
+    def _calculate_and_save_trajectory(self):
         most_left_point = tuple(np.median(tuple(self.most_left_points), axis=0).astype(int))
         most_right_point = tuple(np.median(tuple(self.most_right_points), axis=0).astype(int))
         coefficients = np.polyfit(
@@ -176,6 +298,7 @@ class Motion:
             "amount_of_runs": self.amount_of_runs,
             "motion_history": self._get_cleared_motion_history_for_statistics(),
             "trajectory": [self.trajectory_left, self.trajectory_right],
+            "orientation": self.orientation,
         }
         return motion_statistics
 
@@ -197,11 +320,11 @@ class Motion:
 
         if self.current_mass_center[0] < max_of_most_left_points[0]:
             self.most_left_points.add(self.current_mass_center)
-            if len(self.most_left_points) > Motion.amount_of_border_points:
+            if len(self.most_left_points) > Motion._amount_of_border_points:
                 self.most_left_points.remove(max_of_most_left_points)
         if self.current_mass_center[0] > min_of_most_right_points[0]:
             self.most_right_points.add(self.current_mass_center)
-            if len(self.most_right_points) > Motion.amount_of_border_points:
+            if len(self.most_right_points) > Motion._amount_of_border_points:
                 self.most_right_points.remove(min_of_most_right_points)
 
     def _update_edges(self, rectangle: Rectangle):
@@ -217,6 +340,7 @@ class Motion:
 
 
 class MotionDetector:
+    _threshold_value: int = THRESHOLD_VALUE
     """
     This class contains all motion records and updates them.
     """
@@ -227,16 +351,12 @@ class MotionDetector:
     ):
         # Initializing passed arguments
         self.first_frame = first_frame
-        self.max_amount_of_recorded_runs = max_amount_of_recorded_runs
+
+        # Initialize the motion max amount of runs, which would be similar for all motions
+        Motion.max_amount_of_recorded_runs = max_amount_of_recorded_runs
 
         # Initializing implicit arguments
         self.detected_motions: List[Motion] = []
-
-        # Constants
-        self._direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
-        self._direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
-        self._endpoint_window_size_elements: int = ENDPOINT_WINDOW_SIZE__ELEMENTS
-        self._threshold_value: int = THRESHOLD_VALUE
 
     def detect_motions_on_frame(
             self,
@@ -251,14 +371,14 @@ class MotionDetector:
         :return:
         """
         self._update_all_existing_motions_with_zero_placeholder()
-        self._detect_and_update_closest_or_create_new(gray_frame, frame_index)
-        self._detect_and_save_directions()
-        self._detect_and_save_endpoints()
-        self._calculate_and_save_trajectory()
+        self._detect_and_update_existing_motions_or_create_new(gray_frame, frame_index)
+        # self._detect_and_save_directions(detected_motions)
+        # self._detect_and_save_endpoints()
+        # self._calculate_and_save_trajectory()
 
-    def add_motions_to_frame(self, frame: np.ndarray):
+    def draw_motions_on_frame(self, frame: np.ndarray):
         self._draw_rectangles_on_frame(frame)
-        self._draw_trajectory_on_frame(frame)
+        # self._draw_trajectory_on_frame(frame)
 
     def draw_plots(self):
         fig = plt.figure()
@@ -280,7 +400,7 @@ class MotionDetector:
         # compute the absolute difference between the current frame and
         # first frame
         frame_delta = cv2.absdiff(self.first_frame, current_frame)
-        thresh = cv2.threshold(frame_delta, self._threshold_value, 255, cv2.THRESH_BINARY)[1]
+        thresh = cv2.threshold(frame_delta, MotionDetector._threshold_value, 255, cv2.THRESH_BINARY)[1]
         # dilate the threshold image to fill in holes, then find contours
         # on threshold image
         thresh = cv2.dilate(thresh, None, iterations=2)
@@ -299,7 +419,11 @@ class MotionDetector:
         for motion in self.detected_motions:
             motion.add_zero_placeholder()
 
-    def _detect_and_update_closest_or_create_new(self, gray_frame: np.ndarray, frame_index: int):
+    def _detect_and_update_existing_motions_or_create_new(
+            self,
+            gray_frame: np.ndarray,
+            frame_index: int
+    ):
         """
         Takes some mass center and frame_index to either update existing record or to create new
         if no close (determined by closest_distance parameter in record class) records exist.
@@ -307,50 +431,43 @@ class MotionDetector:
         Fray frame from which rectangles will be extracted.
         :param frame_index: int
         Number which determines at which place record should be updated
-        :return: None
+        :return: List[Motion]
         """
         rectangles_mass_centers = self._get_rectangles_mass_centers(gray_frame)
-        for rect_mass_center in rectangles_mass_centers:
-            found = self._existing_motion_found_and_updated(rect_mass_center, frame_index)
-            if not found:
-                self._create_new_motion(rect_mass_center, frame_index)
+        for rectangle, mass_center in rectangles_mass_centers:
+            self._detect_and_update_single_existing_motion_or_create_new(rectangle, mass_center, frame_index)
 
-    def _existing_motion_found_and_updated(
+    def _detect_and_update_single_existing_motion_or_create_new(
             self,
-            rect_mass_center: Tuple[Rectangle, Point],
+            rectangle: Rectangle,
+            mass_center: Point,
             frame_index: int
-    ) -> bool:
+    ):
         """
-        Check all existing motions. Return True if given mass center corresponds to any motion.
-        Otherwise return False
-        :param rect_mass_center:
-        :param frame_index:
+        Check all existing motions. If no existing motion was detected, create a new motion
+        :param mass_center:
         :return: bool
         """
-        rectangle = rect_mass_center[0]
-        mass_center = rect_mass_center[1]
         for motion in self.detected_motions:
             if motion.is_closest_mass_distance(mass_center):
-                if motion.amount_of_runs <= self.max_amount_of_recorded_runs:
-                    motion.update_record_data(rectangle)
-                motion.update_motion_history(mass_center, frame_index)
-                return True
-        return False
+                motion.update_record_data(rectangle, mass_center, frame_index)
+                return
+        self._create_new_motion(rectangle, mass_center, frame_index)
 
-    def _create_new_motion(self, rect_mass_center: Tuple[Rectangle, Point], frame_index: int):
+    def _create_new_motion(self, rectangle: Rectangle, mass_center: Point, frame_index: int):
         """
         If no existing motions were detected, create new motion
         :param rect_mass_center:
         :param frame_index:
         :return:
         """
-        new_record_id = len(self.detected_motions)
+        new_record_id = len(self.detected_motions) + 1
         self.detected_motions.append(
             Motion(
-                new_record_id,
-                rect_mass_center[0],
-                rect_mass_center[1],
-                [0] * frame_index
+                record_id=new_record_id,
+                initial_rectangle=rectangle,
+                initial_mass_center=mass_center,
+                motion_history=[0]*frame_index
             )
         )
 
@@ -360,38 +477,6 @@ class MotionDetector:
             lambda rectangle: (rectangle, (rectangle[0] + rectangle[2] // 2, rectangle[1] + rectangle[3] // 2)),
             rectangles
         ))
-
-    def _detect_and_save_directions(self):
-        """
-        This function detects direction by following method:
-        - It takes a frame of last `WINDOW_SIZE__ELEMENTS` motions
-        - It compares a median value of that frame with a median of previous window
-        - If difference is bigger than `WINDOW_SIZE__PIXELS` -> register a motion in a direction
-        :return:
-        """
-        for motion in self.detected_motions:
-            motion.detect_and_save_direction(
-                self._direction_window_size_elements,
-                self._direction_window_size_pixels
-            )
-
-    def _detect_and_save_endpoints(self):
-        """
-        This function detects endpoints by following method:
-        - Takes a window of last `ENDPOINT_WINDOW_SIZE__ELEMENTS` motion records
-        - If most of records is right -> last detected endpoint is left
-        - If most of records is left -> last detected endpoint is right
-        - If current detected endpoint is left and last detected endpoint is right -> +1 amount of runs
-        - And vice versa
-        :return:
-        """
-        for motion in self.detected_motions:
-            motion.detect_and_save_endpoint(self._endpoint_window_size_elements)
-
-    def _calculate_and_save_trajectory(self):
-        for motion in self.detected_motions:
-            if motion.amount_of_runs == self.max_amount_of_recorded_runs + 1:
-                motion.calculate_and_save_trajectory()
 
     def _draw_rectangles_on_frame(self, frame: np.ndarray):
         for motion in self.detected_motions:
@@ -408,6 +493,16 @@ class MotionDetector:
                 4,
                 (0, 255, 0),
                 -1
+            )
+            cv2.putText(
+                img=frame,
+                text=f"{motion.record_id}",
+                org=(motion.most_right_edge - 10, motion.most_upper_edge - 10),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=0.5,
+                color=(0, 255, 0),
+                thickness=1,
+                lineType=cv2.LINE_AA
             )
 
     def _draw_trajectory_on_frame(self, frame: np.ndarray):

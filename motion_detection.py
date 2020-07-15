@@ -37,7 +37,7 @@ def main():
         gray_frame = grayscale_frame(frame)
 
         motion_detector.detect_motions_on_frame(gray_frame, frame_index)
-        motion_detector.add_motions_to_frame(frame)
+        motion_detector.draw_motions_on_frame(frame)
 
         cv2.imshow("motion detection", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -52,7 +52,7 @@ def main():
     cv2.destroyAllWindows()
 
     # movement_detector.draw_plots()
-    # pprint(movement_detector.generate_statistics())
+    pprint(motion_detector.generate_statistics())
 
 
 if __name__ == "__main__":
