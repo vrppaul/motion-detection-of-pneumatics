@@ -352,7 +352,7 @@ class Motion:
             specific_statistics = {
                 "location": self.initial_mass_center
             }
-        motion_statistics.update(specific_statistics)
+        motion_statistics.update(**specific_statistics)
         return motion_statistics
 
     def _get_cleared_motion_history_for_statistics(self):

@@ -1,5 +1,5 @@
 import argparse
-from pprint import pprint
+import pprint
 
 import cv2
 
@@ -52,7 +52,8 @@ def main():
     cv2.destroyAllWindows()
 
     # movement_detector.draw_plots()
-    pprint(motion_detector.generate_statistics())
+    with open("statistics.txt", "w") as statistics_file:
+        statistics_file.write(pprint.pformat(motion_detector.generate_statistics()))
 
 
 if __name__ == "__main__":

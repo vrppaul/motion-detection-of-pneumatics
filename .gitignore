@@ -168,3 +168,6 @@ pip-selfcheck.json
 **/*.avi
 
 **/__pycache__/
+
+# Ignore all txt files since they are just notes
+**/*.txt
