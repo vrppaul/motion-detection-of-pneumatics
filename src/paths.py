@@ -5,3 +5,4 @@ DATA_PATH = os.path.join(PROJECT_ROOT_PATH, 'data')
 
 INPUT_PATH = os.path.join(DATA_PATH, "render.avi")
 OUTPUT_PATH = os.path.join(DATA_PATH, "motion_capture.mp4")
+DISTURBED_PATH = os.path.join(DATA_PATH, "render_disturbed.avi")

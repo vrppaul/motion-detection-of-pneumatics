@@ -11,7 +11,7 @@ import random
 import cv2
 import numpy as np
 
-from src.paths import INPUT_PATH, OUTPUT_PATH
+from src.paths import INPUT_PATH, DISTURBED_PATH
 
 
 def disturb_image(frame):
@@ -44,7 +44,7 @@ def disturb_image(frame):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enter input and output video paths")
     parser.add_argument("--input_path", default=INPUT_PATH, help="Path to input raw video.")
-    parser.add_argument("--output_path", default=OUTPUT_PATH, help="Path to output video with detected motion.")
+    parser.add_argument("--output_path", default=DISTURBED_PATH, help="Path to output video with detected motion.")
     args = parser.parse_args()
 
     # Create a VideoCapture object

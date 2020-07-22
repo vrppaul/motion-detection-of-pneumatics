@@ -14,7 +14,8 @@ from constants import (
     DIRECTION_WINDOW_SIZE__ELEMENTS,
     DIRECTION_WINDOW_SIZE__PIXELS,
     DETECT_MOTION_WINDOW_SIZE,
-    ENDPOINT_WINDOW_SIZE__ELEMENTS, THRESHOLD_VALUE,
+    ENDPOINT_WINDOW_SIZE__ELEMENTS,
+    THRESHOLD_VALUE,
 )
 
 
@@ -81,6 +82,12 @@ class Orientation(Enum):
 class MotionType(Enum):
     MOTOR = "motor"
     BLINKER = "blinker"
+
+    def is_motor(self):
+        return self is MotionType.MOTOR
+
+    def is_blinker(self):
+        return self is MotionType.BLINKER
 
 
 Rectangle = List[int]
@@ -209,11 +216,11 @@ class Motion:
 
     def _detect_motion_type(self):
         if len(self.mass_center_history) == Motion._min_amount_of_rectangles_for_properties_detection:
-            amount_of_zero = len(list(filter(
-                lambda distance: distance == 0,
+            amount_of_non_moving = len(list(filter(
+                lambda distance: distance < Motion._direction_window_size_pixels,
                 self.motion_history[-Motion._min_amount_of_rectangles_for_properties_detection:]
             )))
-            if amount_of_zero > math.ceil(Motion._min_amount_of_rectangles_for_properties_detection / 2):
+            if amount_of_non_moving > math.ceil(Motion._min_amount_of_rectangles_for_properties_detection / 2):
                 self.motion_type = MotionType.BLINKER
             else:
                 self.motion_type = MotionType.MOTOR
@@ -300,34 +307,46 @@ class Motion:
                 self.most_down_points, self.most_up_points
             )
             # TODO: compare to classical approach
-            coefficients = np.polyfit(
-                (most_down_point[0], most_up_point[0]),
-                (most_down_point[1], most_up_point[1]),
-                1
-            )
-            down_x = (self.most_lower_edge - coefficients[1]) / coefficients[0]
-            down_x = min(max(down_x, self.most_left_edge), self.most_right_edge)
-            up_x = (self.most_upper_edge - coefficients[1]) / coefficients[0]
-            up_x = min(max(up_x, self.most_left_edge), self.most_right_edge)
-            down_y = down_x * coefficients[0] + coefficients[1]
-            up_y = up_x * coefficients[0] + coefficients[1]
+            if most_down_point[0] != most_up_point[0]:
+                coefficients = np.polyfit(
+                    (most_down_point[0], most_up_point[0]),
+                    (most_down_point[1], most_up_point[1]),
+                    1
+                )
+                down_x = (self.most_lower_edge - coefficients[1]) / coefficients[0]
+                down_x = min(max(down_x, self.most_left_edge), self.most_right_edge)
+                up_x = (self.most_upper_edge - coefficients[1]) / coefficients[0]
+                up_x = min(max(up_x, self.most_left_edge), self.most_right_edge)
+                down_y = down_x * coefficients[0] + coefficients[1]
+                up_y = up_x * coefficients[0] + coefficients[1]
+            else:
+                down_x = most_down_point[0]
+                up_x = down_x
+                down_y = self.most_lower_edge
+                up_y = self.most_upper_edge
             self.trajectory_from = (int(down_x), int(down_y))
             self.trajectory_to = (int(up_x), int(up_y))
         else:
             most_left_point, most_right_point = self._calculate_median_border_point(
                 self.most_left_points, self.most_right_points
             )
-            coefficients = np.polyfit(
-                (most_left_point[0], most_right_point[0]),
-                (most_left_point[1], most_right_point[1]),
-                1
-            )
-            left_y = coefficients[0] * self.most_left_edge + coefficients[1]
-            left_y = min(max(left_y, self.most_upper_edge), self.most_lower_edge)
-            right_y = coefficients[0] * self.most_right_edge + coefficients[1]
-            right_y = min(max(right_y, self.most_upper_edge), self.most_lower_edge)
-            left_x = (left_y - coefficients[1]) / coefficients[0]
-            right_x = (right_y - coefficients[1]) / coefficients[0]
+            if most_left_point[1] != most_right_point[1]:
+                coefficients = np.polyfit(
+                    (most_left_point[0], most_right_point[0]),
+                    (most_left_point[1], most_right_point[1]),
+                    1
+                )
+                left_y = coefficients[0] * self.most_left_edge + coefficients[1]
+                left_y = min(max(left_y, self.most_upper_edge), self.most_lower_edge)
+                right_y = coefficients[0] * self.most_right_edge + coefficients[1]
+                right_y = min(max(right_y, self.most_upper_edge), self.most_lower_edge)
+                left_x = (left_y - coefficients[1]) / coefficients[0]
+                right_x = (right_y - coefficients[1]) / coefficients[0]
+            else:
+                left_x = self.most_left_edge
+                right_x = self.most_right_edge
+                left_y = most_left_point[1]
+                right_y = left_y
             self.trajectory_from = (int(left_x), int(left_y))
             self.trajectory_to = (int(right_x), int(right_y))
 
@@ -454,7 +473,9 @@ class MotionDetector:
 
     def generate_statistics(self) -> Dict:
         all_motions_statistics = {
-            "amount_of_motors": len(self.detected_motions),
+            "amount_of_motions": len(self.detected_motions),
+            "amount_of_motors": len([motion for motion in self.detected_motions if motion.motion_type.is_motor()]),
+            "amount_of_blinkers": len([motion for motion in self.detected_motions if motion.motion_type.is_blinker()]),
             "statistics": [motion.generate_statistics() for motion in self.detected_motions]
         }
         return all_motions_statistics
@@ -469,8 +490,9 @@ class MotionDetector:
         thresh = cv2.dilate(thresh, None, iterations=2)
         contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contours = imutils.grab_contours(contours)
-        contours = filter(lambda contour: cv2.contourArea(contour) > 20, contours)
-        rectangles = list(map(lambda contour: cv2.boundingRect(contour), contours))
+        # What if we check not the contour but the rectangle size
+        contours = filter(lambda contour: cv2.contourArea(contour) > 10, contours)
+        rectangles = list(map(cv2.boundingRect, contours))
         return rectangles
 
     def _update_all_existing_motions_with_zero_placeholder(self):

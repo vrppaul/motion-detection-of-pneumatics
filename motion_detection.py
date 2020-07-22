@@ -4,7 +4,7 @@ import pprint
 import cv2
 
 from constants import MAX_AMOUNT_OF_TRAINING_RUNS
-from src.paths import INPUT_PATH, OUTPUT_PATH
+from src.paths import INPUT_PATH, OUTPUT_PATH, DISTURBED_PATH
 from models import MotionDetector
 from video_utils import (
     get_videos_metadata,
@@ -14,7 +14,7 @@ from video_utils import (
 
 def main():
     parser = argparse.ArgumentParser(description="Enter input and output video paths")
-    parser.add_argument("--input_path", default=INPUT_PATH, help="Path to input raw video.")
+    parser.add_argument("--input_path", default=DISTURBED_PATH, help="Path to input raw video.")
     parser.add_argument("--output_path", default=OUTPUT_PATH, help="Path to output video with detected motion.")
     parser.add_argument(
         "--recorded_runs",
