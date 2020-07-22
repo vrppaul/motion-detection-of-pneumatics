@@ -9,7 +9,7 @@ import imutils
 import matplotlib.pyplot as plt
 import numpy as np
 
-from constants import (
+from src.utils import (
     AMOUNT_OF_BORDER_POINTS,
     DIRECTION_WINDOW_SIZE__ELEMENTS,
     DIRECTION_WINDOW_SIZE__PIXELS,

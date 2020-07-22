@@ -6,12 +6,11 @@ python disturber.py <input_file>
 
 """
 import argparse
-import random
 
 import cv2
 import numpy as np
 
-from src.paths import INPUT_PATH, DISTURBED_PATH
+from src.utils.paths import INPUT_PATH, DISTURBED_PATH
 
 
 def disturb_image(frame):

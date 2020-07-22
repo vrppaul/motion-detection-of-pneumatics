@@ -3,10 +3,9 @@ import pprint
 
 import cv2
 
-from constants import MAX_AMOUNT_OF_TRAINING_RUNS
-from src.paths import INPUT_PATH, OUTPUT_PATH, DISTURBED_PATH
-from models import MotionDetector
-from video_utils import (
+from src.utils import MAX_AMOUNT_OF_TRAINING_RUNS, OUTPUT_PATH, DISTURBED_PATH
+from src.models import MotionDetector
+from src.video_utils import (
     get_videos_metadata,
     grayscale_frame,
 )
@@ -52,7 +51,7 @@ def main():
     cv2.destroyAllWindows()
 
     # movement_detector.draw_plots()
-    with open("statistics.txt", "w") as statistics_file:
+    with open("../statistics.txt", "w") as statistics_file:
         statistics_file.write(pprint.pformat(motion_detector.generate_statistics()))
 
 
