@@ -68,9 +68,15 @@ class Direction(Enum):
             raise ValueError("Please provide the correct direction type")
 
 
-class Orientation(Enum):
+class EnumWithNotDefined(Enum):
+    def is_defined(self):
+        return self is not self.NOT_DEFINED
+
+
+class Orientation(EnumWithNotDefined):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
+    NOT_DEFINED = "not defined"
 
     def is_vertical(self):
         return self is Orientation.VERTICAL
@@ -79,9 +85,10 @@ class Orientation(Enum):
         return not self.is_vertical()
 
 
-class MotionType(Enum):
+class MotionType(EnumWithNotDefined):
     MOTOR = "motor"
     BLINKER = "blinker"
+    NOT_DEFINED = "not defined"
 
     def is_motor(self):
         return self is MotionType.MOTOR
@@ -96,11 +103,11 @@ Point = Tuple[int, ...]
 
 def _find_distance(first_mc: Point, second_mc: Point) -> float:
     """
-    Measures euclidean between two mass centers
+    Measures euclidean distance between two mass centers.
 
-    :param first_mc: List[float]
-    :param second_mc: List[float]
-    :return: float
+    :param first_mc: List[float], first mass center
+    :param second_mc: List[float], second mass center
+    :return: float, the calculated distance
     """
     return math.sqrt(
         (first_mc[0] - second_mc[0]) ** 2 + (first_mc[1] - second_mc[1]) ** 2
@@ -110,7 +117,8 @@ def _find_distance(first_mc: Point, second_mc: Point) -> float:
 class Motion:
     # Constants
     _amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
-    _min_amount_of_rectangles_for_properties_detection: int = 10
+    _min_amount_of_rectangles_for_type_detection: int = 10
+    _min_amount_of_rectangles_for_orientation_detection: int = 10
     _detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
     _direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
     _direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
@@ -153,14 +161,15 @@ class Motion:
         self.last_detected_endpoint: Optional[Direction] = None
         self.most_left_points: Set[Point] = {(1000000, 1000000)}
         self.most_right_points: Set[Point] = {(-1000000, -1000000)}
-        self.most_down_points: Set[Point] = {(-1000000, -1000000)}
-        self.most_up_points: Set[Point] = {(1000000, 1000000)}
+        self.most_lower_points: Set[Point] = {(-1000000, -1000000)}
+        self.most_upper_points: Set[Point] = {(1000000, 1000000)}
         self.mass_center_history: List[Point] = []
         self.motion_direction_history: List[Direction] = []
         self.trajectory_from: Optional[Point] = None
         self.trajectory_to: Optional[Point] = None
-        self.orientation: Optional[Orientation] = None
-        self.motion_type: Optional[MotionType] = None
+        self.orientation: Orientation = Orientation.NOT_DEFINED
+        self.motion_type: MotionType = MotionType.NOT_DEFINED
+        self.trajectory_is_defined: bool = False
 
         x, y, w, h = initial_rectangle
         self.most_left_edge: int = x
@@ -182,17 +191,18 @@ class Motion:
         """
         self._update_motion_history(mass_center, frame_index)
         self._detect_motion_type()
-        if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
-            self._update_edges(rectangle)
-        if self.orientation is None:
-            self._detect_orientation()
-        else:
+        if not self.motion_type.is_blinker():
             if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
-                self._update_border_points()
-            self._detect_and_save_direction()
-            self._detect_and_save_endpoint()
-            if self.amount_of_runs == Motion.max_amount_of_recorded_runs:
-                self._calculate_and_save_trajectory()
+                self._update_edges(rectangle)
+            if not self.orientation.is_defined():
+                self._detect_orientation()
+            else:
+                if self.amount_of_runs <= Motion.max_amount_of_recorded_runs:
+                    self._update_border_points()
+                self._detect_and_save_direction()
+                self._detect_and_save_end_position()
+                if not self.trajectory_is_defined and self.amount_of_runs == Motion.max_amount_of_recorded_runs:
+                    self._calculate_and_save_trajectory()
 
     def is_closest_mass_distance(self, mass_center: Point):
         """
@@ -215,21 +225,19 @@ class Motion:
         self.motion_history[frame_index - 1] = _find_distance(self.initial_mass_center, mass_center)
 
     def _detect_motion_type(self):
-        if len(self.mass_center_history) == Motion._min_amount_of_rectangles_for_properties_detection:
-            amount_of_non_moving = len(list(filter(
+        if len(self.mass_center_history) == Motion._min_amount_of_rectangles_for_type_detection:
+            number_of_non_moving = len(list(filter(
                 lambda distance: distance < Motion._direction_window_size_pixels,
-                self.motion_history[-Motion._min_amount_of_rectangles_for_properties_detection:]
+                self.motion_history[-Motion._min_amount_of_rectangles_for_type_detection:]
             )))
-            if amount_of_non_moving > math.ceil(Motion._min_amount_of_rectangles_for_properties_detection / 2):
+            if number_of_non_moving > math.ceil(Motion._min_amount_of_rectangles_for_type_detection / 2):
                 self.motion_type = MotionType.BLINKER
             else:
                 self.motion_type = MotionType.MOTOR
 
     def _detect_orientation(self):
-        if self.motion_type is MotionType.BLINKER:
-            return
-        amount_non_null_elements = len(self.mass_center_history)
-        if amount_non_null_elements == Motion._min_amount_of_rectangles_for_properties_detection:
+        number_non_null_elements = len(self.mass_center_history)
+        if number_non_null_elements == Motion._min_amount_of_rectangles_for_orientation_detection:
             if self.most_right_edge - self.most_left_edge > self.most_lower_edge - self.most_upper_edge:
                 self.orientation = Orientation.HORIZONTAL
             else:
@@ -237,13 +245,13 @@ class Motion:
 
     def _detect_and_save_direction(self):
         if len(self.mass_center_history) > Motion._direction_window_size_elements:
-            current_median_position = statistics.mean(
+            current_median_position = statistics.median(
                 self.motion_history[-Motion._direction_window_size_elements:]
             )
-            current_median_x_coordinate = statistics.mean(
+            current_median_x_coordinate = statistics.median(
                 [mass_center[0] for mass_center in self.mass_center_history[-Motion._direction_window_size_elements:]]
             )
-            current_median_y_coordinate = statistics.mean(
+            current_median_y_coordinate = statistics.median(
                 [mass_center[1] for mass_center in self.mass_center_history[-Motion._direction_window_size_elements:]]
             )
             self.median_position_history.append(current_median_position)
@@ -274,7 +282,7 @@ class Motion:
                 self.current_median_mass_center = (current_median_x_coordinate, current_median_y_coordinate)
                 self.current_median_position = current_median_position
 
-    def _detect_and_save_endpoint(self):
+    def _detect_and_save_end_position(self):
         """
         Imagine the following situation. Motor is going from left to right,
         thus previously detected endpoint should be LEFT (motor previously reached left side of its path).
@@ -287,13 +295,19 @@ class Motion:
         if len(self.motion_direction_history) > Motion._endpoint_window_size_elements:
             last_directions = self.motion_direction_history[-Motion._endpoint_window_size_elements:]
             if self.orientation.is_vertical():
-                transformed_directions = [
-                    Direction.DOWN if direction.is_down() else Direction.UP for direction in last_directions
-                ]
+                transformed_directions = []
+                for direction in last_directions:
+                    if direction.is_down():
+                        transformed_directions.append(Direction.DOWN)
+                    elif direction.is_up():
+                        transformed_directions.append(Direction.UP)
             else:
-                transformed_directions = [
-                    Direction.LEFT if direction.is_left() else Direction.RIGHT for direction in last_directions
-                ]
+                transformed_directions = []
+                for direction in last_directions:
+                    if direction.is_left():
+                        transformed_directions.append(Direction.LEFT)
+                    elif direction.is_right():
+                        transformed_directions.append(Direction.RIGHT)
             most_often = Counter(transformed_directions).most_common()[0][0]
             if self.last_detected_endpoint is None:
                 self.last_detected_endpoint = most_often.opposite
@@ -303,14 +317,14 @@ class Motion:
 
     def _calculate_and_save_trajectory(self):
         if self.orientation.is_vertical():
-            most_down_point, most_up_point = self._calculate_median_border_point(
-                self.most_down_points, self.most_up_points
+            most_lower_point, most_upper_point = self._calculate_median_border_point(
+                self.most_lower_points, self.most_upper_points
             )
             # TODO: compare to classical approach
-            if most_down_point[0] != most_up_point[0]:
+            if most_lower_point[0] != most_upper_point[0]:
                 coefficients = np.polyfit(
-                    (most_down_point[0], most_up_point[0]),
-                    (most_down_point[1], most_up_point[1]),
+                    (most_lower_point[0], most_upper_point[0]),
+                    (most_lower_point[1], most_upper_point[1]),
                     1
                 )
                 down_x = (self.most_lower_edge - coefficients[1]) / coefficients[0]
@@ -320,7 +334,7 @@ class Motion:
                 down_y = down_x * coefficients[0] + coefficients[1]
                 up_y = up_x * coefficients[0] + coefficients[1]
             else:
-                down_x = most_down_point[0]
+                down_x = most_lower_point[0]
                 up_x = down_x
                 down_y = self.most_lower_edge
                 up_y = self.most_upper_edge
@@ -349,6 +363,7 @@ class Motion:
                 right_y = left_y
             self.trajectory_from = (int(left_x), int(left_y))
             self.trajectory_to = (int(right_x), int(right_y))
+        self.trajectory_is_defined = True
 
     def _calculate_median_border_point(self, down_or_left_points: Set[Point], up_or_right_points: Set[Point]):
         from_ = tuple(np.median(tuple(down_or_left_points), axis=0).astype(int))
@@ -360,7 +375,7 @@ class Motion:
             "id": self.record_id,
             "motion_type": self.motion_type,
         }
-        if self.motion_type is MotionType.MOTOR:
+        if self.motion_type.is_motor():
             specific_statistics = {
                 "amount_of_runs": self.amount_of_runs,
                 "motion_history": self._get_cleared_motion_history_for_statistics(),
@@ -410,7 +425,7 @@ class Motion:
         self._update_any_orientation_points(self.most_left_points, self.most_right_points, 0)
 
     def _update_vertical_border_points(self):
-        self._update_any_orientation_points(self.most_up_points, self.most_down_points, 1)
+        self._update_any_orientation_points(self.most_upper_points, self.most_lower_points, 1)
 
     def _update_edges(self, rectangle: Rectangle):
         x, y, w, h = rectangle
@@ -487,11 +502,12 @@ class MotionDetector:
         thresh = cv2.threshold(frame_delta, MotionDetector._threshold_value, 255, cv2.THRESH_BINARY)[1]
         # dilate the threshold image to fill in holes, then find contours
         # on threshold image
-        thresh = cv2.dilate(thresh, None, iterations=2)
-        contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        kernel = np.ones((3, 3), np.uint8)
+        erosion = cv2.erode(thresh, kernel, iterations=1)
+        dilation = cv2.dilate(erosion, kernel, iterations=1)
+        contours = cv2.findContours(dilation, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contours = imutils.grab_contours(contours)
-        # What if we check not the contour but the rectangle size
-        contours = filter(lambda contour: cv2.contourArea(contour) > 10, contours)
+        contours = filter(lambda contour: cv2.contourArea(contour) > 5, contours)
         rectangles = list(map(cv2.boundingRect, contours))
         return rectangles
 

@@ -51,7 +51,7 @@ def main():
     cv2.destroyAllWindows()
 
     # movement_detector.draw_plots()
-    with open("../statistics.txt", "w") as statistics_file:
+    with open("statistics.txt", "w") as statistics_file:
         statistics_file.write(pprint.pformat(motion_detector.generate_statistics()))
 
 
