@@ -16,6 +16,7 @@ from src.utils import (
     DETECT_MOTION_WINDOW_SIZE,
     ENDPOINT_WINDOW_SIZE__ELEMENTS,
     THRESHOLD_VALUE,
+    RECTANGLES_FOR_TYPE_DETECTION, RECTANGLES_FOR_ORIENTATION_DETECTION,
 )
 
 
@@ -78,10 +79,10 @@ class Orientation(EnumWithNotDefined):
     HORIZONTAL = "horizontal"
     NOT_DEFINED = "not defined"
 
-    def is_vertical(self):
+    def is_vertical(self) -> bool:
         return self is Orientation.VERTICAL
 
-    def is_horizontal(self):
+    def is_horizontal(self) -> bool:
         return not self.is_vertical()
 
 
@@ -90,10 +91,10 @@ class MotionType(EnumWithNotDefined):
     BLINKER = "blinker"
     NOT_DEFINED = "not defined"
 
-    def is_motor(self):
+    def is_motor(self) -> bool:
         return self is MotionType.MOTOR
 
-    def is_blinker(self):
+    def is_blinker(self) -> bool:
         return self is MotionType.BLINKER
 
 
@@ -117,8 +118,8 @@ def _find_distance(first_mc: Point, second_mc: Point) -> float:
 class Motion:
     # Constants
     _amount_of_border_points: int = AMOUNT_OF_BORDER_POINTS
-    _min_amount_of_rectangles_for_type_detection: int = 10
-    _min_amount_of_rectangles_for_orientation_detection: int = 10
+    _min_amount_of_rectangles_for_type_detection: int = RECTANGLES_FOR_TYPE_DETECTION
+    _min_amount_of_rectangles_for_orientation_detection: int = RECTANGLES_FOR_ORIENTATION_DETECTION
     _detect_motion_window_size: int = DETECT_MOTION_WINDOW_SIZE
     _direction_window_size_elements: int = DIRECTION_WINDOW_SIZE__ELEMENTS
     _direction_window_size_pixels: int = DIRECTION_WINDOW_SIZE__PIXELS
@@ -608,7 +609,7 @@ class MotionDetector:
 
     def _draw_trajectory_on_frame(self, frame: np.ndarray):
         for motion in self.detected_motions:
-            if motion.amount_of_runs > Motion.max_amount_of_recorded_runs:
+            if motion.trajectory_is_defined:
                 cv2.line(
                     frame,
                     motion.trajectory_from,
