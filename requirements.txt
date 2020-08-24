@@ -3,3 +3,4 @@ matplotlib
 numpy
 opencv-contrib-python
 dataclasses ; python_version < "3.7"
+video_flawer
